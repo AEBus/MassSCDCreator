@@ -1,0 +1,68 @@
+name: Release On Tag
+
+on:
+  push:
+    tags:
+      - "v*"
+      - "*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-release:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 8 SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Restore
+        run: dotnet restore .\MassSCDCreator.slnx
+
+      - name: Build Release
+        run: dotnet build .\MassSCDCreator.slnx -c Release --no-restore
+
+      - name: Publish app
+        run: dotnet publish .\MassSCDCreator\MassSCDCreator.csproj -c Release -r win-x64 --self-contained false --no-build
+
+      - name: Prepare archive metadata
+        id: archive
+        shell: pwsh
+        run: |
+          $tagName = "${{ github.ref_name }}"
+          $publishDir = Join-Path $PWD "MassSCDCreator\bin\Release\net8.0-windows\win-x64\publish"
+          $archiveName = "MassSCDCreator-$tagName-win-x64.zip"
+          $archivePath = Join-Path $PWD $archiveName
+
+          if( -not (Test-Path $publishDir) ) {
+              throw "Publish directory was not found: $publishDir"
+          }
+
+          if( Test-Path $archivePath ) {
+              Remove-Item $archivePath -Force
+          }
+
+          # I used to trust packaging steps to stay obvious. Then CI reminded me that explicit paths age better than optimism.
+          Compress-Archive -Path (Join-Path $publishDir '*') -DestinationPath $archivePath -CompressionLevel Optimal
+
+          "archive_name=$archiveName" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "archive_path=$archivePath" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.archive.outputs.archive_name }}
+          path: ${{ steps.archive.outputs.archive_path }}
+          if-no-files-found: error
+
+      - name: Publish GitHub release asset
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ steps.archive.outputs.archive_path }}
+          generate_release_notes: true
