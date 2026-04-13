@@ -1,197 +1,110 @@
 # Mass SCD Creator
 
-Windows WPF application for creating or refreshing FFXIV `.scd` files from common audio formats, with optional Penumbra playlist export.
+Mass SCD Creator is a Windows app for turning common audio files into FFXIV `.scd` files.
 
-## What It Does
+It is meant to be simple: pick your audio, choose where the `.scd` files should go, and let the app handle the conversion.
 
-`Mass SCD Creator` supports three workflows:
+## What You Can Do
 
-1. `Single file`
-   Create one `.scd` from one audio file.
-2. `Audio folder`
-   Convert every supported audio file in a folder into `.scd`, optionally including subfolders.
-3. `Refresh SCD library`
-   Repair or rebuild existing `.scd` files in place, either by keeping the current structure or matching them to a template.
+- Convert one audio file into one `.scd`
+- Convert a whole folder of audio files in one run
+- Refresh an existing `.scd` library without rebuilding everything by hand
+- Optionally export the result into a Penumbra mod
+- Optionally create or append a Penumbra playlist JSON
 
-The app can also:
+## Supported Audio Formats
 
-- convert audio to OGG Vorbis through `ffmpeg`
-- rebuild loop and marker metadata
-- preserve or replace SCD structure depending on mode
-- copy finished `.scd` files into a Penumbra mod
-- create or append a Penumbra playlist JSON
-
-## Supported Input Formats
-
-The app currently accepts:
+The app accepts the most common formats, including:
 
 - `.mp3`
 - `.flac`
 - `.ogg`
-- `.m4a`
 - `.wav`
+- `.m4a`
 - `.aac`
-- `.wma`
 - `.opus`
+- `.wma`
 - `.aiff`
 - `.aif`
 - `.mp4`
 - `.m4b`
 
-Output is always Vorbis-based `.scd`.
+Output is always `.scd`.
 
-## Build
+## Download And Run
 
-Requirements:
+1. Open the [Releases](https://github.com/AEBus/MassSCDCreator/releases) page.
+2. Download the latest `.zip` file for Windows.
+3. Extract it to any folder.
+4. Run `MassSCDCreator.exe`.
 
-- Windows
-- .NET SDK 8
-- `ffmpeg.exe` available in `PATH`, downloaded by the app into `Tools\ffmpeg`, or selected manually in the UI
+## First Launch
 
-Build:
+The app needs `ffmpeg` for audio conversion.
+
+If `ffmpeg` is not already available, the app can help you set it up. In normal use, this is a one-time step and then you can forget it exists, which is how tools should behave when they want to keep their friends.
+
+## Typical Workflows
+
+### Convert One File
+
+1. Choose `Single file`.
+2. Select your audio file.
+3. Choose the output `.scd` path.
+4. Start processing.
+
+### Convert A Folder
+
+1. Choose `Audio folder`.
+2. Select the folder with your music.
+3. Choose the output folder.
+4. Start processing.
+
+### Refresh Existing SCD Files
+
+1. Choose `Refresh SCD library`.
+2. Select the folder with existing `.scd` files.
+3. Choose how you want them refreshed.
+4. Start processing.
+
+## Penumbra Support
+
+After conversion, you can export the finished files into a Penumbra mod.
+
+The app can:
+
+- copy generated `.scd` files into a selected mod
+- create a new playlist JSON
+- append tracks to an existing playlist JSON
+
+If you do not use Penumbra, you can ignore this part completely.
+
+## Good To Know
+
+- The app is for Windows.
+- It is focused on practical batch conversion, not on making you manually fight every file one by one.
+- If a track uses looping, the app rebuilds the loop data for the new output.
+
+## Troubleshooting
+
+If something does not work as expected:
+
+- make sure the source audio file actually plays
+- make sure the output folder is writable
+- make sure `ffmpeg` is available or let the app set it up
+- try again with a simple `.wav` or `.mp3` file first
+
+## For Developers
+
+If you want to build the app from source:
 
 ```powershell
-cd E:\GitHub\MassSCDCreator
 dotnet restore .\MassSCDCreator.slnx
 dotnet build .\MassSCDCreator.slnx -c Release
 ```
 
-Run from source:
+To publish a release build manually:
 
 ```powershell
-dotnet run --project .\MassSCDCreator\MassSCDCreator.csproj -c Debug
-```
-
-## Publish
-
-Default release target is Windows `win-x64`, framework-dependent.
-
-Publish manually:
-
-```powershell
-dotnet publish .\MassSCDCreator\MassSCDCreator.csproj -c Release -r win-x64 --self-contained false
-```
-
-Or use the included profile:
-
-```powershell
-dotnet publish .\MassSCDCreator\MassSCDCreator.csproj -c Release -p:PublishProfile=FolderProfile
-```
-
-Expected output:
-
-- published executable: `MassSCDCreator.exe`
-- publish folder: `MassSCDCreator\bin\Release\net8.0-windows\win-x64\publish\`
-
-## FFmpeg Behavior
-
-The app does not ship the FFmpeg binaries inside the repository, but it can work in three ways:
-
-1. use `ffmpeg.exe` found in `Tools\ffmpeg`
-2. use `ffmpeg.exe` found in `PATH`
-3. use a manually selected `ffmpeg.exe`
-
-On startup, the app can offer to download FFmpeg into `Tools\ffmpeg` if nothing usable is found.
-
-## Penumbra Export
-
-After generating `.scd` files, the app can optionally export them into an existing Penumbra mod.
-
-Supported flows:
-
-- create a new `group_XXX_*.json` playlist
-- append new tracks to an existing `group_XXX_*.json` playlist
-
-Export behavior:
-
-- copies generated `.scd` files into a relative folder inside the selected mod root
-- writes `Files` mappings for one or more game paths
-- creates a new `Single` group or appends options to an existing `Single` group
-
-Append mode notes:
-
-- select the existing playlist JSON explicitly
-- append mode currently supports only Penumbra `Single` groups
-- duplicate track names are auto-renamed to keep the resulting JSON valid
-
-## Workflow Summary
-
-### Single File
-
-1. Choose `Single file`.
-2. Pick one supported audio file.
-3. Pick the output `.scd` path.
-4. Choose a built-in template or a custom `template.scd`.
-5. Adjust audio settings if needed.
-6. Start processing.
-
-### Audio Folder
-
-1. Choose `Audio folder`.
-2. Pick a source folder.
-3. Pick an output folder.
-4. Enable recursive search if needed.
-5. Choose a built-in template or a custom `template.scd`.
-6. Start processing.
-
-### Refresh SCD Library
-
-1. Choose `Refresh SCD library`.
-2. Pick a folder with existing `.scd` files.
-3. Decide whether to:
-   - refresh structure and metadata only
-   - rebuild audio only
-   - rebuild both structure and audio
-4. Optionally enable recursive search.
-5. Start processing.
-
-## Audio Settings
-
-The current shipping preset is intentionally simple:
-
-- Vorbis quality `q7`
-- stereo output
-- `44.1 kHz`
-
-Advanced mode also supports:
-
-- explicit Vorbis VBR quality
-- explicit nominal bitrate target
-
-Loop handling:
-
-- when enabled, the app writes a full-track loop
-- `LoopStart = 0`
-- `LoopEnd` is rebuilt from the new track
-- marker and track timeline data are rewritten to match
-
-## SCD Logic
-
-The implementation rebuilds SCD files by following the same practical model used in VFXEditor-derived research:
-
-- read SCD header and section tables
-- validate that the template contains exactly one non-empty audio entry
-- preserve non-audio sections from the chosen structure source
-- rebuild the Vorbis audio entry
-- rewrite offsets, loop metadata, marker timing, and track playback timeline
-- update stored play time metadata
-
-This repository also contains `_verify` helper projects used to sanity-check SCD behavior during development. They are verification tooling, not part of the shipping application.
-
-## Project Structure
-
-- `MassSCDCreator`
-  - WPF UI, view-models, services, and localization resources
-- `_verify`
-  - developer verification runners for SCD-related checks
-- `tmp`
-  - non-shipping research/reference material
-
-## Validation
-
-Useful local checks:
-
-```powershell
-dotnet build .\MassSCDCreator.slnx -c Release
 dotnet publish .\MassSCDCreator\MassSCDCreator.csproj -c Release -r win-x64 --self-contained false
 ```
