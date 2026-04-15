@@ -176,9 +176,29 @@
                 </DataTrigger>
             </Style.Triggers>
         </Style>
-        <Style x:Key="PresetCompatibleCardStyle" TargetType="Button" BasedOn="{StaticResource WorkflowCardBaseStyle}">
+        <Style x:Key="AudioProfileRecommendedCardStyle" TargetType="Button" BasedOn="{StaticResource WorkflowCardBaseStyle}">
             <Style.Triggers>
-                <DataTrigger Binding="{Binding IsCompatiblePresetSelected}" Value="True">
+                <DataTrigger Binding="{Binding IsRecommendedAudioProfileSelected}" Value="True">
+                    <Setter Property="Background" Value="{DynamicResource AccentSelectionBrush}" />
+                    <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
+                    <Setter Property="BorderThickness" Value="3" />
+                    <Setter Property="Foreground" Value="{DynamicResource PrimaryTextBrush}" />
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+        <Style x:Key="AudioProfileCustomCardStyle" TargetType="Button" BasedOn="{StaticResource WorkflowCardBaseStyle}">
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding IsCustomAudioProfileSelected}" Value="True">
+                    <Setter Property="Background" Value="{DynamicResource AccentSelectionBrush}" />
+                    <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
+                    <Setter Property="BorderThickness" Value="3" />
+                    <Setter Property="Foreground" Value="{DynamicResource PrimaryTextBrush}" />
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+        <Style x:Key="AudioProfileOriginalOggCardStyle" TargetType="Button" BasedOn="{StaticResource WorkflowCardBaseStyle}">
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding IsOriginalOggAudioProfileSelected}" Value="True">
                     <Setter Property="Background" Value="{DynamicResource AccentSelectionBrush}" />
                     <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
                     <Setter Property="BorderThickness" Value="3" />
@@ -437,36 +457,53 @@
 
                                     <StackPanel Visibility="{Binding ShowAudioEncodingOptions, Converter={StaticResource BooleanToVisibilityConverter}}">
                                         <TextBlock Margin="0,24,0,8" Style="{StaticResource FieldLabelStyle}" Text="{Binding Texts[AudioRecommendedTitle]}" />
-                                        <Button Style="{StaticResource PresetCompatibleCardStyle}" Command="{Binding SelectCompatiblePresetCommand}">
+                                        <Button Margin="0,0,0,12" Style="{StaticResource AudioProfileRecommendedCardStyle}" Command="{Binding SelectRecommendedAudioProfileCommand}">
                                             <StackPanel>
-                                                <TextBlock FontSize="17" FontWeight="SemiBold" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" Text="{Binding Texts[PresetCompatibleTitle]}" />
-                                                <TextBlock Margin="0,6,0,0" TextWrapping="Wrap" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" Opacity="0.9" Text="{Binding Texts[PresetCompatibleDesc]}" />
+                                                <TextBlock FontSize="17" FontWeight="SemiBold" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" Text="{Binding Texts[AudioProfileRecommendedTitle]}" />
+                                                <TextBlock Margin="0,6,0,0" TextWrapping="Wrap" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" Opacity="0.9" Text="{Binding Texts[AudioProfileRecommendedDesc]}" />
+                                            </StackPanel>
+                                        </Button>
+                                        <Button Margin="0,0,0,12" Style="{StaticResource AudioProfileCustomCardStyle}" Command="{Binding SelectCustomAudioProfileCommand}">
+                                            <StackPanel>
+                                                <TextBlock FontSize="17" FontWeight="SemiBold" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" Text="{Binding Texts[AudioProfileCustomTitle]}" />
+                                                <TextBlock Margin="0,6,0,0" TextWrapping="Wrap" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" Opacity="0.9" Text="{Binding Texts[AudioProfileCustomDesc]}" />
+                                            </StackPanel>
+                                        </Button>
+                                        <Button Style="{StaticResource AudioProfileOriginalOggCardStyle}" Command="{Binding SelectOriginalOggAudioProfileCommand}">
+                                            <StackPanel>
+                                                <TextBlock FontSize="17" FontWeight="SemiBold" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" Text="{Binding Texts[AudioProfileOriginalOggTitle]}" />
+                                                <TextBlock Margin="0,6,0,0" TextWrapping="Wrap" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" Opacity="0.9" Text="{Binding Texts[AudioProfileOriginalOggDesc]}" />
                                             </StackPanel>
                                         </Button>
 
-                                        <TextBlock Margin="0,18,0,8" Style="{StaticResource FieldLabelStyle}" Text="{Binding Texts[FfmpegLabel]}" />
-                                        <Grid Margin="0,0,0,10">
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="*" />
-                                                <ColumnDefinition Width="Auto" />
-                                            </Grid.ColumnDefinitions>
-                                            <TextBox Margin="0,0,12,0" Text="{Binding FfmpegPath, UpdateSourceTrigger=PropertyChanged}" />
-                                            <Button Grid.Column="1" MinWidth="120" Command="{Binding BrowseFfmpegCommand}" Content="{Binding Texts[BrowseButton]}" />
-                                        </Grid>
-                                        <WrapPanel Margin="0,0,0,10">
-                                            <Button MinWidth="180" Command="{Binding DownloadOrUpdateFfmpegCommand}" Content="{Binding Texts[FfmpegInstallButton]}" />
-                                            <Button Margin="12,0,0,0" MinWidth="160" Command="{Binding ResetFfmpegStartupCheckCommand}" Content="{Binding Texts[FfmpegResetStartupCheckButton]}" />
-                                        </WrapPanel>
-                                        <TextBlock Margin="0,0,0,14" Style="{StaticResource MutedTextStyle}" Text="{Binding Texts[FfmpegHint]}" />
-                                        <TextBlock Margin="0,0,0,10"
-                                               Style="{StaticResource MutedTextStyle}"
-                                               Visibility="{Binding ShowFfmpegStatus, Converter={StaticResource BooleanToVisibilityConverter}}"
-                                               Text="{Binding FfmpegInstallStatus}" />
+                                        <Border Style="{StaticResource SubtleCardBorderStyle}" Margin="0,14,0,0" Visibility="{Binding ShowOriginalOggHint, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                            <TextBlock Style="{StaticResource MutedTextStyle}" Text="{Binding Texts[AudioProfileOriginalOggHint]}" />
+                                        </Border>
 
-                                        <CheckBox Margin="0,20,0,0" IsChecked="{Binding ShowAdvancedAudioOptions}" Content="{Binding Texts[AudioAdvancedTitle]}" />
-                                        <Border Style="{StaticResource SubtleCardBorderStyle}" Margin="0,14,0,0" Visibility="{Binding ShowAdvancedAudioOptions, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                        <StackPanel Margin="0,18,0,0" Visibility="{Binding ShowFfmpegOptions, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                            <TextBlock Margin="0,0,0,8" Style="{StaticResource FieldLabelStyle}" Text="{Binding Texts[FfmpegLabel]}" />
+                                            <Grid Margin="0,0,0,10">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+                                                <TextBox Margin="0,0,12,0" Text="{Binding FfmpegPath, UpdateSourceTrigger=PropertyChanged}" />
+                                                <Button Grid.Column="1" MinWidth="120" Command="{Binding BrowseFfmpegCommand}" Content="{Binding Texts[BrowseButton]}" />
+                                            </Grid>
+                                            <WrapPanel Margin="0,0,0,10">
+                                                <Button MinWidth="180" Command="{Binding DownloadOrUpdateFfmpegCommand}" Content="{Binding Texts[FfmpegInstallButton]}" />
+                                                <Button Margin="12,0,0,0" MinWidth="160" Command="{Binding ResetFfmpegStartupCheckCommand}" Content="{Binding Texts[FfmpegResetStartupCheckButton]}" />
+                                            </WrapPanel>
+                                            <TextBlock Margin="0,0,0,14" Style="{StaticResource MutedTextStyle}" Text="{Binding Texts[FfmpegHint]}" />
+                                            <TextBlock Margin="0,0,0,10"
+                                                   Style="{StaticResource MutedTextStyle}"
+                                                   Visibility="{Binding ShowFfmpegStatus, Converter={StaticResource BooleanToVisibilityConverter}}"
+                                                   Text="{Binding FfmpegInstallStatus}" />
+                                        </StackPanel>
+
+                                        <Border Style="{StaticResource SubtleCardBorderStyle}" Margin="0,14,0,0" Visibility="{Binding ShowCustomAudioOptions, Converter={StaticResource BooleanToVisibilityConverter}}">
                                             <StackPanel>
-                                                <TextBlock Style="{StaticResource FieldLabelStyle}" Text="{Binding Texts[AdvancedModeQuality]}" />
+                                                <TextBlock Style="{StaticResource FieldLabelStyle}" Text="{Binding Texts[AudioCustomModeTitle]}" />
                                                 <Grid Margin="0,0,0,12">
                                                     <Grid.ColumnDefinitions>
                                                         <ColumnDefinition Width="*" />
@@ -480,7 +517,17 @@
                                                     </Button>
                                                 </Grid>
                                                 <TextBlock Margin="0,12,0,8" Style="{StaticResource FieldLabelStyle}" Text="{Binding Texts[AdvancedValueLabel]}" />
-                                                <TextBox Width="180" Text="{Binding AdvancedValue, UpdateSourceTrigger=PropertyChanged}" />
+                                                <StackPanel Visibility="{Binding IsAdvancedQualityModeSelected, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                                    <Slider Minimum="1"
+                                                            Maximum="10"
+                                                            TickFrequency="0.5"
+                                                            IsSnapToTickEnabled="False"
+                                                            Value="{Binding AdvancedQualitySliderValue, UpdateSourceTrigger=PropertyChanged}" />
+                                                    <TextBlock Margin="0,8,0,0" Style="{StaticResource MutedTextStyle}" Text="{Binding AdvancedValue}" />
+                                                </StackPanel>
+                                                <TextBox Width="180"
+                                                         Visibility="{Binding IsAdvancedQualityModeSelected, Converter={StaticResource InverseBooleanToVisibilityConverter}}"
+                                                         Text="{Binding AdvancedValue, UpdateSourceTrigger=PropertyChanged}" />
                                                 <TextBlock Margin="0,10,0,0" Style="{StaticResource MutedTextStyle}" Text="{Binding AdvancedModeHint}" />
                                             </StackPanel>
                                         </Border>

@@ -31,6 +31,26 @@ The app accepts the most common formats, including:
 
 Output is always `.scd`.
 
+## Audio Profile Modes
+
+The app has three mutually-exclusive audio profiles:
+
+- `Recommended`
+  - Uses ffmpeg with the built-in balanced preset (`VBR quality 7`, `44.1 kHz`).
+- `Custom`
+  - Uses ffmpeg with selectable mode:
+    - `VBR quality` (`1` to `10`, slider)
+    - `Nominal bitrate` (kbps)
+- `Original OGG`
+  - No ffmpeg and no re-encoding.
+  - Source OGG is packaged directly into SCD.
+
+When `Original OGG` is selected:
+
+- `Single file`: input must be `.ogg`.
+- `Audio folder`: only `.ogg` files are processed; other supported audio files are skipped and listed in the log.
+- `Refresh` with audio rebuild: the embedded Vorbis OGG is reused directly without re-encoding.
+
 ## Download And Run
 
 1. Open the [Releases](https://github.com/AEBus/MassSCDCreator/releases) page.
@@ -40,9 +60,11 @@ Output is always `.scd`.
 
 ## First Launch
 
-The app needs `ffmpeg` for audio conversion.
+`ffmpeg` is required for `Recommended` and `Custom` audio profiles.
 
 If `ffmpeg` is not already available, the app can help you set it up. In normal use, this is a one-time step and then you can forget it exists, which is how tools should behave when they want to keep their friends.
+
+`Original OGG` does not require `ffmpeg`.
 
 ## Typical Workflows
 
@@ -91,7 +113,8 @@ If something does not work as expected:
 
 - make sure the source audio file actually plays
 - make sure the output folder is writable
-- make sure `ffmpeg` is available or let the app set it up
+- for `Recommended`/`Custom`, make sure `ffmpeg` is available or let the app set it up
+- for `Original OGG` in folder mode, check the log for files skipped as non-OGG
 - try again with a simple `.wav` or `.mp3` file first
 
 ## For Developers

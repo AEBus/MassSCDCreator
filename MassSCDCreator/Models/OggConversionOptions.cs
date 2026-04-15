@@ -2,8 +2,7 @@ namespace MassSCDCreator.Models;
 
 public sealed class OggConversionOptions {
     public ExistingScdRefreshAction ExistingScdRefreshAction { get; init; } = ExistingScdRefreshAction.MatchTemplateOnly;
-    public bool UsePresetMode { get; init; } = false;
-    public OggPresetMode PresetMode { get; init; } = OggPresetMode.HighQualityCompatible;
+    public AudioProfileMode AudioProfileMode { get; init; } = AudioProfileMode.Recommended;
     public OggAdvancedMode AdvancedMode { get; init; } = OggAdvancedMode.QualityVbr;
     public double QualityLevel { get; init; } = 7.0;
     public int NominalBitrateKbps { get; init; } = 320;
@@ -12,4 +11,6 @@ public sealed class OggConversionOptions {
     public bool SaveIntermediateOggFiles { get; init; }
     public bool RecursiveSearchEnabled { get; init; }
     public string? FfmpegPath { get; init; }
+
+    public bool RequiresFfmpeg => AudioProfileMode != AudioProfileMode.OriginalOgg;
 }

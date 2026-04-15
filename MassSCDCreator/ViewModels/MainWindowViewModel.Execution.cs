@@ -12,6 +12,10 @@ using MassSCDCreator.Services.Logging;
 namespace MassSCDCreator.ViewModels;
 
 public partial class MainWindowViewModel {
+    private static readonly HashSet<string> SupportedAudioExtensions = [
+        ".mp3", ".flac", ".ogg", ".m4a", ".wav", ".aac", ".wma", ".opus", ".aiff", ".aif", ".mp4", ".m4b"
+    ];
+
     [RelayCommand( CanExecute = nameof( CanStartProcessing ) )]
     private async Task StartAsync() {
         try {
@@ -103,9 +107,17 @@ public partial class MainWindowViewModel {
             if( !File.Exists( InputPath ) ) {
                 yield return Texts["ValidationInputFileMissing"];
             }
+            else if( ShowAudioEncodingOptions && SelectedAudioProfileMode == AudioProfileMode.OriginalOgg && !IsOggFilePath( InputPath ) ) {
+                yield return Texts["ValidationOriginalOggSingleInputOnly"];
+            }
         }
         else if( !Directory.Exists( InputPath ) ) {
             yield return IsRefreshMode ? Texts["ValidationRefreshFolderMissing"] : Texts["ValidationInputFolderMissing"];
+        }
+        else if( IsBatchMode && ShowAudioEncodingOptions && SelectedAudioProfileMode == AudioProfileMode.OriginalOgg ) {
+            if( !HasAnyOggInputFile( InputPath ) ) {
+                yield return Texts["ValidationOriginalOggBatchNoOggFiles"];
+            }
         }
 
         if( !ShowOutputSelection ) {
@@ -137,11 +149,11 @@ public partial class MainWindowViewModel {
             yield break;
         }
 
-        if( !string.IsNullOrWhiteSpace( FfmpegPath ) && !File.Exists( FfmpegPath ) ) {
+        if( IsFfmpegRequiredForSelectedAudioProfile() && !string.IsNullOrWhiteSpace( FfmpegPath ) && !File.Exists( FfmpegPath ) ) {
             yield return Texts["ValidationFfmpegFileMissing"];
         }
 
-        if( UsePresetMode ) {
+        if( SelectedAudioProfileMode != AudioProfileMode.Custom ) {
             yield break;
         }
 
@@ -193,15 +205,14 @@ public partial class MainWindowViewModel {
             TemplateScdPath = SelectedTemplateSourceMode == TemplateSourceMode.CustomFile ? TemplateScdPath.Trim() : string.Empty,
             Conversion = new OggConversionOptions {
                 ExistingScdRefreshAction = SelectedExistingScdRefreshAction,
-                UsePresetMode = UsePresetMode,
-                PresetMode = SelectedPresetMode,
-                AdvancedMode = SelectedAdvancedMode,
+                AudioProfileMode = SelectedAudioProfileMode,
+                AdvancedMode = SelectedAudioProfileMode == AudioProfileMode.Custom ? SelectedAdvancedMode : OggAdvancedMode.QualityVbr,
                 QualityLevel = ParseQuality(),
                 NominalBitrateKbps = ParseNominalBitrate(),
                 EnableLoop = EnableLoop,
                 SaveIntermediateOggFiles = SaveIntermediateOggFiles,
                 RecursiveSearchEnabled = RecursiveSearchEnabled,
-                FfmpegPath = string.IsNullOrWhiteSpace( FfmpegPath ) ? null : FfmpegPath.Trim()
+                FfmpegPath = IsFfmpegRequiredForSelectedAudioProfile() && !string.IsNullOrWhiteSpace( FfmpegPath ) ? FfmpegPath.Trim() : null
             },
             PenumbraExport = new PenumbraExportOptions {
                 Enabled = ShowPenumbraStep && PenumbraExportEnabled,
@@ -216,11 +227,7 @@ public partial class MainWindowViewModel {
     }
 
     private double ParseQuality() {
-        if( UsePresetMode ) {
-            return 7.0;
-        }
-
-        if( SelectedAdvancedMode != OggAdvancedMode.QualityVbr ) {
+        if( SelectedAudioProfileMode != AudioProfileMode.Custom || SelectedAdvancedMode != OggAdvancedMode.QualityVbr ) {
             return 7.0;
         }
 
@@ -228,11 +235,11 @@ public partial class MainWindowViewModel {
             throw new InvalidOperationException( Texts["ValidationQualityNumber"] );
         }
 
-        return result;
+        return Math.Clamp( result, 1.0, 10.0 );
     }
 
     private int ParseNominalBitrate() {
-        if( UsePresetMode || SelectedAdvancedMode != OggAdvancedMode.NominalBitrate ) {
+        if( SelectedAudioProfileMode != AudioProfileMode.Custom || SelectedAdvancedMode != OggAdvancedMode.NominalBitrate ) {
             return 320;
         }
 
@@ -241,6 +248,30 @@ public partial class MainWindowViewModel {
         }
 
         return result;
+    }
+
+    private bool IsFfmpegRequiredForSelectedAudioProfile() =>
+        ShowAudioEncodingOptions && SelectedAudioProfileMode != AudioProfileMode.OriginalOgg;
+
+
+    private bool HasAnyOggInputFile( string inputFolder ) {
+        var option = RecursiveSearchEnabled ? SearchOption.AllDirectories : SearchOption.TopDirectoryOnly;
+        return Directory.EnumerateFiles( inputFolder, "*.*", option )
+            .Any( path => IsSupportedAudioPath( path ) && IsOggFilePath( path ) );
+    }
+
+    private static bool IsSupportedAudioPath( string path ) =>
+        SupportedAudioExtensions.Contains( Path.GetExtension( path ) );
+
+    private static bool IsOggFilePath( string path ) =>
+        string.Equals( Path.GetExtension( path ), ".ogg", StringComparison.OrdinalIgnoreCase );
+
+    private static AudioProfileMode ResolveAudioProfileModeFromSettings( AppSettings settings ) {
+        if( settings.SelectedAudioProfileMode.HasValue ) {
+            return settings.SelectedAudioProfileMode.Value;
+        }
+
+        return settings.UsePresetMode ? AudioProfileMode.Recommended : AudioProfileMode.Custom;
     }
 
     private IReadOnlyList<string> ParseGamePaths() {
@@ -453,8 +484,7 @@ public partial class MainWindowViewModel {
                 : settings.BatchRecursiveSearchEnabled;
             SaveIntermediateOggFiles = settings.SaveIntermediateOggFiles;
             EnableLoop = settings.EnableLoop;
-            UsePresetMode = settings.UsePresetMode;
-            SelectedPresetMode = OggPresetMode.HighQualityCompatible;
+            SelectedAudioProfileMode = ResolveAudioProfileModeFromSettings( settings );
             SelectedAdvancedMode = settings.SelectedAdvancedMode;
             AdvancedValue = settings.AdvancedValue;
             SelectedExistingScdRefreshAction = settings.SelectedExistingScdRefreshAction;
@@ -477,6 +507,7 @@ public partial class MainWindowViewModel {
         } );
 
         ExistingPenumbraPlaylistSummary = TryDescribePenumbraPlaylist( ExistingPenumbraPlaylistPath );
+        CoerceAdvancedValue();
         _outputPathManagedByWizard = string.IsNullOrWhiteSpace( OutputPath );
     }
 
@@ -502,8 +533,9 @@ public partial class MainWindowViewModel {
 
         settings.SaveIntermediateOggFiles = SaveIntermediateOggFiles;
         settings.EnableLoop = EnableLoop;
-        settings.UsePresetMode = UsePresetMode;
-        settings.SelectedPresetMode = SelectedPresetMode;
+        settings.SelectedAudioProfileMode = SelectedAudioProfileMode;
+        settings.UsePresetMode = SelectedAudioProfileMode != AudioProfileMode.Custom;
+        settings.SelectedPresetMode = OggPresetMode.HighQualityCompatible;
         settings.SelectedAdvancedMode = SelectedAdvancedMode;
         settings.AdvancedValue = AdvancedValue;
         settings.SelectedExistingScdRefreshAction = SelectedExistingScdRefreshAction;

@@ -107,7 +107,7 @@ public partial class DesktopBootstrap : Application {
     private static async Task EnsureFfmpegAvailabilityAsync( Window owner, IFfmpegInstaller installer, ISettingsService settingsService, MainWindowViewModel viewModel ) {
         try {
             var settings = settingsService.Load();
-            if( settings.SkipFfmpegStartupCheck ) {
+            if( settings.SkipFfmpegStartupCheck || !ShouldRunFfmpegStartupCheck( settings ) ) {
                 return;
             }
 
@@ -134,6 +134,22 @@ public partial class DesktopBootstrap : Application {
         catch( Exception ex ) {
             MessageBox.Show( owner, $"FFmpeg auto-install failed: {ex.Message}", "Mass SCD Creator", MessageBoxButton.OK, MessageBoxImage.Warning );
         }
+    }
+
+    private static bool ShouldRunFfmpegStartupCheck( AppSettings settings ) {
+        if( settings.SelectedMode == ProcessingMode.RepairScdFolder && settings.SelectedExistingScdRefreshAction == ExistingScdRefreshAction.MatchTemplateOnly ) {
+            return false;
+        }
+
+        return ResolveAudioProfileMode( settings ) != AudioProfileMode.OriginalOgg;
+    }
+
+    private static AudioProfileMode ResolveAudioProfileMode( AppSettings settings ) {
+        if( settings.SelectedAudioProfileMode.HasValue ) {
+            return settings.SelectedAudioProfileMode.Value;
+        }
+
+        return settings.UsePresetMode ? AudioProfileMode.Recommended : AudioProfileMode.Custom;
     }
 
     private static async Task<bool> IsFfmpegInPathAsync() {

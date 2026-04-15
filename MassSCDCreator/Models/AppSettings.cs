@@ -13,8 +13,12 @@ public sealed class AppSettings {
     public bool RefreshRecursiveSearchEnabled { get; set; }
     public bool SaveIntermediateOggFiles { get; set; }
     public bool EnableLoop { get; set; }
+    public AudioProfileMode? SelectedAudioProfileMode { get; set; }
+
+    // Legacy fields kept for backward-compatible settings migration.
     public bool UsePresetMode { get; set; } = true;
     public OggPresetMode SelectedPresetMode { get; set; } = OggPresetMode.HighQualityCompatible;
+
     public OggAdvancedMode SelectedAdvancedMode { get; set; } = OggAdvancedMode.QualityVbr;
     public string AdvancedValue { get; set; } = "9";
     public ExistingScdRefreshAction SelectedExistingScdRefreshAction { get; set; } = ExistingScdRefreshAction.MatchTemplateOnly;

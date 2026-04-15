@@ -62,7 +62,13 @@ public partial class MainWindowViewModel {
     private void SelectCurrentTemplate() => SelectedTemplateSourceMode = TemplateSourceMode.CurrentFile;
 
     [RelayCommand]
-    private void SelectCompatiblePreset() => SelectedPresetMode = OggPresetMode.HighQualityCompatible;
+    private void SelectRecommendedAudioProfile() => SelectedAudioProfileMode = AudioProfileMode.Recommended;
+
+    [RelayCommand]
+    private void SelectCustomAudioProfile() => SelectedAudioProfileMode = AudioProfileMode.Custom;
+
+    [RelayCommand]
+    private void SelectOriginalOggAudioProfile() => SelectedAudioProfileMode = AudioProfileMode.OriginalOgg;
 
     [RelayCommand]
     private void SelectAdvancedQualityMode() => SelectedAdvancedMode = OggAdvancedMode.QualityVbr;
@@ -95,7 +101,10 @@ public partial class MainWindowViewModel {
             selected = _dialogService.PickFolder( Texts["DialogSelectInputFolder"] );
         }
         else {
-            selected = _dialogService.PickInputFile( Texts["DialogSelectInputFile"], "Audio files (*.mp3;*.flac;*.ogg;*.m4a;*.wav;*.aac;*.wma;*.opus;*.aiff;*.aif;*.mp4;*.m4b)|*.mp3;*.flac;*.ogg;*.m4a;*.wav;*.aac;*.wma;*.opus;*.aiff;*.aif;*.mp4;*.m4b|All files (*.*)|*.*" );
+            var inputFilter = SelectedAudioProfileMode == AudioProfileMode.OriginalOgg
+                ? "OGG files (*.ogg)|*.ogg|All files (*.*)|*.*"
+                : "Audio files (*.mp3;*.flac;*.ogg;*.m4a;*.wav;*.aac;*.wma;*.opus;*.aiff;*.aif;*.mp4;*.m4b)|*.mp3;*.flac;*.ogg;*.m4a;*.wav;*.aac;*.wma;*.opus;*.aiff;*.aif;*.mp4;*.m4b|All files (*.*)|*.*";
+            selected = _dialogService.PickInputFile( Texts["DialogSelectInputFile"], inputFilter );
         }
 
         if( !string.IsNullOrWhiteSpace( selected ) ) {
@@ -227,8 +236,16 @@ public partial class MainWindowViewModel {
                     RunSilently( () => SelectedTemplateSourceMode = TemplateSourceMode.BuiltInRecommended );
                 }
                 break;
+            case nameof( SelectedAudioProfileMode ):
+                if( SelectedAudioProfileMode == AudioProfileMode.Custom ) {
+                    CoerceAdvancedValue();
+                }
+                break;
             case nameof( SelectedAdvancedMode ):
                 CoerceAdvancedValue();
+                break;
+            case nameof( AdvancedValue ):
+                OnPropertyChanged( nameof( AdvancedQualitySliderValue ) );
                 break;
             case nameof( ExistingPenumbraPlaylistPath ):
                 ExistingPenumbraPlaylistSummary = TryDescribePenumbraPlaylist( ExistingPenumbraPlaylistPath );
@@ -265,8 +282,14 @@ public partial class MainWindowViewModel {
 
     private void CoerceAdvancedValue() {
         RunSilently( () => {
-            if( SelectedAdvancedMode == OggAdvancedMode.QualityVbr && !double.TryParse( AdvancedValue, NumberStyles.Float, CultureInfo.InvariantCulture, out _ ) ) {
-                AdvancedValue = "9";
+            if( SelectedAdvancedMode == OggAdvancedMode.QualityVbr ) {
+                if( !double.TryParse( AdvancedValue, NumberStyles.Float, CultureInfo.InvariantCulture, out var quality ) ) {
+                    AdvancedValue = "9";
+                    return;
+                }
+
+                var clamped = Math.Clamp( quality, 1.0, 10.0 );
+                AdvancedValue = clamped.ToString( "0.0", CultureInfo.InvariantCulture );
             }
             else if( SelectedAdvancedMode == OggAdvancedMode.NominalBitrate && !int.TryParse( AdvancedValue, NumberStyles.Integer, CultureInfo.InvariantCulture, out _ ) ) {
                 AdvancedValue = "320";

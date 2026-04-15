@@ -11,6 +11,7 @@ public sealed class FileBatchProcessor : IFileBatchProcessor {
     private static readonly HashSet<string> SupportedAudioExtensions = [
         ".mp3", ".flac", ".ogg", ".m4a", ".wav", ".aac", ".wma", ".opus", ".aiff", ".aif", ".mp4", ".m4b"
     ];
+    private const string OggExtension = ".ogg";
 
     private readonly IAudioConverter _audioConverter;
     private readonly IScdService _scdService;
@@ -36,6 +37,10 @@ public sealed class FileBatchProcessor : IFileBatchProcessor {
         var sourceFiles = ResolveCreationSourceFiles( request );
         var template = LoadTemplateForRequest( request );
 
+        if( request.Mode == ProcessingMode.BatchFolder && request.Conversion.AudioProfileMode == AudioProfileMode.OriginalOgg ) {
+            LogSkippedNonOggFilesForOriginalProfile( request );
+        }
+
         _logger.Info( $"Template loaded: {template.SourcePath}" );
         _logger.Info( $"Detected {sourceFiles.Count} input file(s)." );
 
@@ -50,20 +55,26 @@ public sealed class FileBatchProcessor : IFileBatchProcessor {
                 cancellationToken.ThrowIfCancellationRequested();
 
                 var sourceFile = sourceFiles[index];
+                var useOriginalOgg = request.Conversion.AudioProfileMode == AudioProfileMode.OriginalOgg;
+
                 progress.Report( new ProcessingProgress {
                     CurrentIndex = index,
                     TotalCount = sourceFiles.Count,
                     CurrentFile = sourceFile,
-                    Stage = "Converting audio to OGG"
+                    Stage = useOriginalOgg ? "Using source OGG" : "Converting audio to OGG"
                 } );
 
                 try {
                     _logger.Info( $"Processing: {sourceFile}" );
 
                     var outputScdPath = GetOutputScdPath( request, sourceFile );
-                    var oggPath = GetIntermediateOggPath( request, sourceFile, outputScdPath, workingTempRoot );
+                    var oggPath = useOriginalOgg
+                        ? sourceFile
+                        : GetIntermediateOggPath( request, sourceFile, outputScdPath, workingTempRoot );
 
-                    await _audioConverter.ConvertAudioToOggAsync( sourceFile, oggPath, request.Conversion, cancellationToken );
+                    if( !useOriginalOgg ) {
+                        await _audioConverter.ConvertAudioToOggAsync( sourceFile, oggPath, request.Conversion, cancellationToken );
+                    }
 
                     progress.Report( new ProcessingProgress {
                         CurrentIndex = index,
@@ -78,7 +89,7 @@ public sealed class FileBatchProcessor : IFileBatchProcessor {
 
                     _logger.Success( $"Created: {result.OutputPath} | {result.SampleRate} Hz | {result.ChannelCount} ch | {result.Duration:g}" );
 
-                    if( !request.Conversion.SaveIntermediateOggFiles && File.Exists( oggPath ) ) {
+                    if( !useOriginalOgg && !request.Conversion.SaveIntermediateOggFiles && File.Exists( oggPath ) ) {
                         File.Delete( oggPath );
                     }
                 }
@@ -229,6 +240,10 @@ public sealed class FileBatchProcessor : IFileBatchProcessor {
                 throw new FileNotFoundException( $"Input audio file was not found: {request.InputPath}" );
             }
 
+            if( request.Conversion.AudioProfileMode == AudioProfileMode.OriginalOgg && !IsOggFile( request.InputPath ) ) {
+                throw new InvalidOperationException( "Original OGG profile only supports .ogg input files in single-file mode." );
+            }
+
             var directory = Path.GetDirectoryName( request.OutputPath );
             if( string.IsNullOrWhiteSpace( directory ) ) {
                 throw new InvalidOperationException( "Choose a valid output path for the SCD file." );
@@ -242,6 +257,10 @@ public sealed class FileBatchProcessor : IFileBatchProcessor {
             throw new DirectoryNotFoundException( request.Mode == ProcessingMode.RepairScdFolder
                 ? $"The folder with SCD files was not found: {request.InputPath}"
                 : $"The input folder was not found: {request.InputPath}" );
+        }
+
+        if( request.Mode != ProcessingMode.RepairScdFolder && request.Conversion.AudioProfileMode == AudioProfileMode.OriginalOgg ) {
+            ValidateOriginalOggBatchInput( request );
         }
 
         if( request.Mode != ProcessingMode.RepairScdFolder ) {
@@ -274,13 +293,61 @@ public sealed class FileBatchProcessor : IFileBatchProcessor {
             .ToList();
 
         if( files.Count == 0 ) {
+            if( request.Conversion.AudioProfileMode == AudioProfileMode.OriginalOgg ) {
+                throw new InvalidOperationException( "Original OGG profile requires .ogg files, but none were found in the selected folder." );
+            }
+
             throw new InvalidOperationException( "No supported audio files were found in the selected folder." );
+        }
+
+        if( request.Conversion.AudioProfileMode == AudioProfileMode.OriginalOgg ) {
+            var oggFiles = files
+                .Where( IsOggFile )
+                .ToList();
+
+            if( oggFiles.Count == 0 ) {
+                throw new InvalidOperationException( "Original OGG profile requires .ogg files, but none were found in the selected folder." );
+            }
+
+            return oggFiles;
         }
 
         return files;
     }
 
     private static bool IsSupportedAudioFile( string path ) => SupportedAudioExtensions.Contains( Path.GetExtension( path ) );
+
+    private static bool IsOggFile( string path ) =>
+        string.Equals( Path.GetExtension( path ), OggExtension, StringComparison.OrdinalIgnoreCase );
+
+    private static void ValidateOriginalOggBatchInput( ProcessRequest request ) {
+        var option = request.Conversion.RecursiveSearchEnabled ? SearchOption.AllDirectories : SearchOption.TopDirectoryOnly;
+        var supportedAudioFiles = Directory.EnumerateFiles( request.InputPath, "*.*", option )
+            .Where( IsSupportedAudioFile )
+            .ToList();
+
+        if( supportedAudioFiles.Count == 0 || supportedAudioFiles.All( path => !IsOggFile( path ) ) ) {
+            throw new InvalidOperationException( "Original OGG profile requires .ogg files, but none were found in the selected folder." );
+        }
+    }
+
+    private void LogSkippedNonOggFilesForOriginalProfile( ProcessRequest request ) {
+        var option = request.Conversion.RecursiveSearchEnabled ? SearchOption.AllDirectories : SearchOption.TopDirectoryOnly;
+        var skippedFiles = Directory.EnumerateFiles( request.InputPath, "*.*", option )
+            .Where( IsSupportedAudioFile )
+            .Where( path => !IsOggFile( path ) )
+            .OrderBy( path => path, StringComparer.OrdinalIgnoreCase )
+            .ToList();
+
+        if( skippedFiles.Count == 0 ) {
+            return;
+        }
+
+        _logger.Info( $"Original OGG profile: skipping {skippedFiles.Count} non-OGG file(s)." );
+        foreach( var skippedFile in skippedFiles ) {
+            _logger.Info( $"Skipped: {skippedFile}" );
+        }
+    }
 
     private static IReadOnlyList<string> ResolveRefreshSourceFiles( ProcessRequest request ) {
         var option = request.Conversion.RecursiveSearchEnabled ? SearchOption.AllDirectories : SearchOption.TopDirectoryOnly;
@@ -299,10 +366,16 @@ public sealed class FileBatchProcessor : IFileBatchProcessor {
         var fileStem = Path.GetFileNameWithoutExtension( sourceFile );
         var extractedOggPath = Path.Combine( workingTempRoot, fileStem + ".refresh.source.ogg" );
         var convertedOggPath = Path.Combine( workingTempRoot, fileStem + ".refresh.converted.ogg" );
-        // Past-me would have called this wasteful. Current hobby-me calls it cheap insurance against stacking fresh encoding on top of stale loop metadata.
+
         _scdService.ExportEmbeddedVorbis( sourceFile, extractedOggPath );
-        await _audioConverter.ConvertOggToOggAsync( extractedOggPath, convertedOggPath, request.Conversion, cancellationToken );
-        return await _scdService.CreateFromTemplateAsync( template, convertedOggPath, sourceFile, request.Conversion.EnableLoop, cancellationToken );
+
+        var oggForWrite = extractedOggPath;
+        if( request.Conversion.AudioProfileMode != AudioProfileMode.OriginalOgg ) {
+            await _audioConverter.ConvertOggToOggAsync( extractedOggPath, convertedOggPath, request.Conversion, cancellationToken );
+            oggForWrite = convertedOggPath;
+        }
+
+        return await _scdService.CreateFromTemplateAsync( template, oggForWrite, sourceFile, request.Conversion.EnableLoop, cancellationToken );
     }
 
     private static string GetOutputScdPath( ProcessRequest request, string sourceFile ) {

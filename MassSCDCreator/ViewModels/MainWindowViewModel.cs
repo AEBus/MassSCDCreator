@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Text;
 using System.Windows;
 using System.Windows.Threading;
@@ -99,9 +100,7 @@ public partial class MainWindowViewModel : ObservableObject {
     [ObservableProperty] private string ffmpegPath = string.Empty;
     [ObservableProperty] private string ffmpegInstallStatus = string.Empty;
     [ObservableProperty] private bool isInstallingFfmpeg;
-    [ObservableProperty] private bool showAdvancedAudioOptions;
-    [ObservableProperty] private bool usePresetMode = true;
-    [ObservableProperty] private OggPresetMode selectedPresetMode = OggPresetMode.HighQualityCompatible;
+    [ObservableProperty] private AudioProfileMode selectedAudioProfileMode = AudioProfileMode.Recommended;
     [ObservableProperty] private OggAdvancedMode selectedAdvancedMode = OggAdvancedMode.QualityVbr;
     [ObservableProperty] private string advancedValue = "9";
     [ObservableProperty] private ExistingScdRefreshAction selectedExistingScdRefreshAction = ExistingScdRefreshAction.MatchTemplateOnly;
@@ -141,7 +140,10 @@ public partial class MainWindowViewModel : ObservableObject {
     public bool ShowTemplatePathSelection => SelectedTemplateSourceMode == TemplateSourceMode.CustomFile;
     public bool ShowRefreshActionSelection => IsRefreshMode;
     public bool ShowAudioEncodingOptions => !IsRefreshMode || SelectedExistingScdRefreshAction != ExistingScdRefreshAction.MatchTemplateOnly;
-    public bool ShowFfmpegStatus => !string.IsNullOrWhiteSpace( FfmpegInstallStatus );
+    public bool ShowFfmpegOptions => ShowAudioEncodingOptions && SelectedAudioProfileMode != AudioProfileMode.OriginalOgg;
+    public bool ShowCustomAudioOptions => ShowAudioEncodingOptions && SelectedAudioProfileMode == AudioProfileMode.Custom;
+    public bool ShowOriginalOggHint => ShowAudioEncodingOptions && SelectedAudioProfileMode == AudioProfileMode.OriginalOgg;
+    public bool ShowFfmpegStatus => ShowFfmpegOptions && !string.IsNullOrWhiteSpace( FfmpegInstallStatus );
     public bool ShowPenumbraSettings => ShowPenumbraStep && PenumbraExportEnabled;
     public bool ShowCreatePlaylistFields => ShowPenumbraSettings && SelectedPenumbraExportMode == PenumbraPlaylistExportMode.CreateNew;
     public bool ShowAppendPlaylistFields => ShowPenumbraSettings && SelectedPenumbraExportMode == PenumbraPlaylistExportMode.AppendExisting;
@@ -151,7 +153,9 @@ public partial class MainWindowViewModel : ObservableObject {
     public bool IsBuiltInTemplateSelected => SelectedTemplateSourceMode == TemplateSourceMode.BuiltInRecommended;
     public bool IsCustomTemplateSelected => SelectedTemplateSourceMode == TemplateSourceMode.CustomFile;
     public bool IsCurrentTemplateSelected => SelectedTemplateSourceMode == TemplateSourceMode.CurrentFile;
-    public bool IsCompatiblePresetSelected => SelectedPresetMode == OggPresetMode.HighQualityCompatible;
+    public bool IsRecommendedAudioProfileSelected => SelectedAudioProfileMode == AudioProfileMode.Recommended;
+    public bool IsCustomAudioProfileSelected => SelectedAudioProfileMode == AudioProfileMode.Custom;
+    public bool IsOriginalOggAudioProfileSelected => SelectedAudioProfileMode == AudioProfileMode.OriginalOgg;
     public bool IsAdvancedQualityModeSelected => SelectedAdvancedMode == OggAdvancedMode.QualityVbr;
     public bool IsAdvancedBitrateModeSelected => SelectedAdvancedMode == OggAdvancedMode.NominalBitrate;
     public bool IsSystemThemeSelected => SelectedThemeMode == ThemeMode.System;
@@ -169,7 +173,25 @@ public partial class MainWindowViewModel : ObservableObject {
     public bool CanToggleLog => !string.IsNullOrWhiteSpace( LogText );
     public string InputLabel => IsBatchMode ? Texts["InputLabelBatch"] : IsRefreshMode ? Texts["InputLabelRefresh"] : Texts["InputLabelSingle"];
     public string OutputLabel => IsBatchMode ? Texts["OutputLabelBatch"] : Texts["OutputLabelSingle"];
-    public string AdvancedModeHint => SelectedAdvancedMode == OggAdvancedMode.QualityVbr ? Texts["ValidationQualityNumber"] : Texts["ValidationBitrateNumber"];
+    public string AdvancedModeHint => SelectedAdvancedMode == OggAdvancedMode.QualityVbr
+        ? Texts["AudioCustomValueHintQuality"]
+        : Texts["AudioCustomValueHintBitrate"];
+    public double AdvancedQualitySliderValue {
+        get {
+            if( !double.TryParse( AdvancedValue, NumberStyles.Float, CultureInfo.InvariantCulture, out var parsedValue ) ) {
+                return 9.0;
+            }
+
+            return Math.Clamp( parsedValue, 1.0, 10.0 );
+        }
+        set {
+            var clamped = Math.Clamp( value, 1.0, 10.0 );
+            var normalized = clamped.ToString( "0.0", CultureInfo.InvariantCulture );
+            if( !string.Equals( AdvancedValue, normalized, StringComparison.Ordinal ) ) {
+                AdvancedValue = normalized;
+            }
+        }
+    }
     public string SummaryModeValue => IsBatchMode ? Texts["ModeBatchTitle"] : IsRefreshMode ? Texts["ModeRefreshTitle"] : Texts["ModeSingleTitle"];
     public string SummaryInputValue => string.IsNullOrWhiteSpace( InputPath ) ? Texts["SummaryNotConfigured"] : InputPath;
     public string SummaryOutputValue => IsRefreshMode ? Texts["RefreshInPlaceHint"] : string.IsNullOrWhiteSpace( OutputPath ) ? Texts["SummaryNotConfigured"] : OutputPath;
@@ -190,9 +212,13 @@ public partial class MainWindowViewModel : ObservableObject {
     public string ReviewChecklistText => BuildReviewChecklistText();
 
     private string BuildAudioEncodingSummary( string? prefix = null ) {
-        var details = UsePresetMode
-            ? Texts["AudioSummaryPresetCompatible"]
-            : SelectedAdvancedMode == OggAdvancedMode.NominalBitrate ? Texts.Format( "AudioSummaryAdvancedBitrate", AdvancedValue ) : Texts.Format( "AudioSummaryAdvancedQuality", AdvancedValue );
+        var details = SelectedAudioProfileMode switch {
+            AudioProfileMode.Custom when SelectedAdvancedMode == OggAdvancedMode.NominalBitrate => Texts.Format( "AudioSummaryCustomBitrate", AdvancedValue ),
+            AudioProfileMode.Custom => Texts.Format( "AudioSummaryCustomQuality", AdvancedValue ),
+            AudioProfileMode.OriginalOgg => Texts["AudioSummaryOriginalOgg"],
+            _ => Texts["AudioSummaryRecommended"]
+        };
+
         return string.IsNullOrWhiteSpace( prefix ) ? details : $"{prefix} | {details}";
     }
 
