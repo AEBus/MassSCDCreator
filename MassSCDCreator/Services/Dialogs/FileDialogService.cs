@@ -39,7 +39,7 @@ public sealed class FileDialogService : IFileDialogService {
     public string? PickExistingPlaylistFile( string title ) {
         var dialog = new OpenFileDialog {
             Title = title,
-            Filter = "Penumbra playlist JSON (group_*.json)|group_*.json|JSON files (*.json)|*.json|All files (*.*)|*.*",
+            Filter = "Penumbra playlist metadata (group_*.json;meta.json)|group_*.json;meta.json|JSON files (*.json)|*.json|All files (*.*)|*.*",
             CheckFileExists = true
         };
 
