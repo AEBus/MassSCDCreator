@@ -187,6 +187,12 @@ public partial class MainWindowViewModel {
             yield return Texts["ValidationExistingPlaylistRequired"];
         }
 
+        if( SelectedPenumbraExportMode == PenumbraPlaylistExportMode.AppendExisting &&
+            IsV4MetadataFile( ExistingPenumbraPlaylistPath ) &&
+            string.IsNullOrWhiteSpace( PenumbraPlaylistName ) ) {
+            yield return Texts["ValidationV4PlaylistNameRequired"];
+        }
+
         if( ParseGamePaths().Count == 0 ) {
             yield return Texts["ValidationGamePathsRequired"];
         }
@@ -338,6 +344,16 @@ public partial class MainWindowViewModel {
             using var document = JsonDocument.Parse( stream );
             var root = document.RootElement;
 
+            if( IsV4MetadataRoot( root ) ) {
+                var groups = GetV4SingleGroups( root );
+                if( groups.Count == 0 ) {
+                    return Texts["ExistingV4MetaNoPlaylists"];
+                }
+
+                var details = string.Join( ", ", groups.Select( group => $"{group.Name} ({group.Options.GetArrayLength()})" ) );
+                return Texts.Format( "ExistingV4MetaSummary", details );
+            }
+
             var name = root.TryGetProperty( "Name", out var nameElement ) && nameElement.ValueKind == JsonValueKind.String
                 ? nameElement.GetString()
                 : null;
@@ -372,7 +388,7 @@ public partial class MainWindowViewModel {
             using var stream = File.OpenRead( path );
             using var document = JsonDocument.Parse( stream );
             var root = document.RootElement;
-            if( !root.TryGetProperty( "Options", out var optionsElement ) || optionsElement.ValueKind != JsonValueKind.Array ) {
+            if( !TryGetPlaylistOptions( root, out var optionsElement ) ) {
                 return;
             }
 
@@ -393,6 +409,82 @@ public partial class MainWindowViewModel {
         catch {
             InferredRelativeFolderWarning = string.Empty;
         }
+    }
+
+    private bool TryGetPlaylistOptions( JsonElement root, out JsonElement options ) {
+        if( root.TryGetProperty( "Options", out options ) && options.ValueKind == JsonValueKind.Array ) {
+            return true;
+        }
+
+        if( !IsV4MetadataRoot( root ) ) {
+            options = default;
+            return false;
+        }
+
+        var groups = GetV4SingleGroups( root );
+        V4SingleGroup? selectedGroup = null;
+        if( !string.IsNullOrWhiteSpace( PenumbraPlaylistName ) ) {
+            selectedGroup = groups.FirstOrDefault( group =>
+                string.Equals( group.Name, PenumbraPlaylistName, StringComparison.OrdinalIgnoreCase ) );
+        }
+        if( selectedGroup is null && groups.Count == 1 ) {
+            selectedGroup = groups[0];
+            var selectedName = selectedGroup.Name;
+            RunSilently( () => PenumbraPlaylistName = selectedName );
+        }
+
+        if( selectedGroup is null ) {
+            options = default;
+            return false;
+        }
+
+        options = selectedGroup.Options;
+        return true;
+    }
+
+    private static bool IsV4MetadataFile( string path ) {
+        if( string.IsNullOrWhiteSpace( path ) || !File.Exists( path ) ) {
+            return false;
+        }
+
+        try {
+            using var stream = File.OpenRead( path );
+            using var document = JsonDocument.Parse( stream );
+            return IsV4MetadataRoot( document.RootElement );
+        }
+        catch {
+            return false;
+        }
+    }
+
+    private static bool IsV4MetadataRoot( JsonElement root ) =>
+        root.TryGetProperty( "FileVersion", out var versionElement ) &&
+        versionElement.ValueKind == JsonValueKind.Number &&
+        versionElement.TryGetUInt32( out var version ) &&
+        version == 4;
+
+    private static List<V4SingleGroup> GetV4SingleGroups( JsonElement root ) {
+        var groups = new List<V4SingleGroup>();
+        if( !root.TryGetProperty( "Groups", out var groupsElement ) || groupsElement.ValueKind != JsonValueKind.Array ) {
+            return groups;
+        }
+
+        foreach( var group in groupsElement.EnumerateArray() ) {
+            var type = group.TryGetProperty( "Type", out var typeElement ) && typeElement.ValueKind == JsonValueKind.String
+                ? typeElement.GetString()
+                : null;
+            var name = group.TryGetProperty( "Name", out var nameElement ) && nameElement.ValueKind == JsonValueKind.String
+                ? nameElement.GetString()
+                : null;
+            if( !string.Equals( type, "Single", StringComparison.OrdinalIgnoreCase ) || string.IsNullOrWhiteSpace( name ) ||
+                !group.TryGetProperty( "Options", out var options ) || options.ValueKind != JsonValueKind.Array ) {
+                continue;
+            }
+
+            groups.Add( new V4SingleGroup( name, options ) );
+        }
+
+        return groups;
     }
 
     private static RelativeFolderAnalysis AnalyzeRelativeFoldersFromOptions( JsonElement optionsElement ) {
@@ -463,6 +555,7 @@ public partial class MainWindowViewModel {
     private static bool IsScdFilePath( string path ) =>
         path.EndsWith( ".scd", StringComparison.OrdinalIgnoreCase );
 
+    private sealed record V4SingleGroup( string Name, JsonElement Options );
     private sealed record RelativeFolderAnalysis( string SelectedFolder, bool HasMultipleFolders );
 
     private void LoadSettings() {
@@ -506,9 +599,14 @@ public partial class MainWindowViewModel {
             _isWindowMaximized = settings.IsWindowMaximized;
         } );
 
+        var savedGamePaths = PenumbraGamePathsText;
+        RefreshPenumbraGamePathCandidates( PenumbraModRootPath, true );
         ExistingPenumbraPlaylistSummary = TryDescribePenumbraPlaylist( ExistingPenumbraPlaylistPath );
         CoerceAdvancedValue();
         _outputPathManagedByWizard = string.IsNullOrWhiteSpace( OutputPath );
+        if( !string.Equals( savedGamePaths, PenumbraGamePathsText, StringComparison.Ordinal ) ) {
+            SaveSettings();
+        }
     }
 
     private void SaveSettings() {

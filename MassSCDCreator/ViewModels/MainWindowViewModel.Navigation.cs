@@ -5,6 +5,7 @@ using System.IO;
 using System.Windows;
 using CommunityToolkit.Mvvm.Input;
 using MassSCDCreator.Models;
+using MassSCDCreator.Services.Penumbra;
 
 namespace MassSCDCreator.ViewModels;
 
@@ -247,14 +248,58 @@ public partial class MainWindowViewModel {
             case nameof( AdvancedValue ):
                 OnPropertyChanged( nameof( AdvancedQualitySliderValue ) );
                 break;
+            case nameof( PenumbraModRootPath ):
+                RefreshPenumbraGamePathCandidates( PenumbraModRootPath, true );
+                break;
             case nameof( ExistingPenumbraPlaylistPath ):
                 ExistingPenumbraPlaylistSummary = TryDescribePenumbraPlaylist( ExistingPenumbraPlaylistPath );
                 ApplyPenumbraPlaylistDefaults( ExistingPenumbraPlaylistPath );
+                break;
+            case nameof( PenumbraPlaylistName ):
+                if( SelectedPenumbraExportMode == PenumbraPlaylistExportMode.AppendExisting && IsV4MetadataFile( ExistingPenumbraPlaylistPath ) ) {
+                    ApplyPenumbraPlaylistDefaults( ExistingPenumbraPlaylistPath );
+                }
+                break;
+            case nameof( SelectedPenumbraGamePathCandidate ):
+                if( SelectedPenumbraGamePathCandidate is not null ) {
+                    RunSilently( () => PenumbraGamePathsText = SelectedPenumbraGamePathCandidate.Path );
+                }
+                break;
+            case nameof( PenumbraGamePathsText ):
+                SynchronizeSelectedGamePathCandidate();
                 break;
         }
 
         RefreshState();
         SaveSettings();
+    }
+
+    private void RefreshPenumbraGamePathCandidates( string modRootPath, bool replaceCurrentPath ) {
+        var candidates = PenumbraGamePathDiscovery.Discover( modRootPath );
+        PenumbraGamePathCandidates.Clear();
+        foreach( var candidate in candidates ) {
+            PenumbraGamePathCandidates.Add( candidate );
+        }
+
+        var preferred = PenumbraGamePathCandidates.FirstOrDefault();
+        RunSilently( () => {
+            SelectedPenumbraGamePathCandidate = preferred;
+            if( replaceCurrentPath && preferred is not null ) {
+                PenumbraGamePathsText = preferred.Path;
+            }
+        } );
+        OnPropertyChanged( nameof( ShowPenumbraGamePathCandidates ) );
+    }
+
+    private void SynchronizeSelectedGamePathCandidate() {
+        var normalized = PenumbraGamePathsText.Trim();
+        var candidate = normalized.Contains( '\n' ) || normalized.Contains( '\r' )
+            ? null
+            : PenumbraGamePathCandidates.FirstOrDefault( item =>
+                string.Equals( item.Path, normalized, StringComparison.OrdinalIgnoreCase ) );
+        if( !ReferenceEquals( SelectedPenumbraGamePathCandidate, candidate ) ) {
+            RunSilently( () => SelectedPenumbraGamePathCandidate = candidate );
+        }
     }
 
     private void ApplyModeDefaults() {

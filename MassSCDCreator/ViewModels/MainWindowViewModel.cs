@@ -87,6 +87,7 @@ public partial class MainWindowViewModel : ObservableObject {
     public ObservableCollection<string> TemplateIssues { get; } = [];
     public ObservableCollection<string> PenumbraIssues { get; } = [];
     public ObservableCollection<string> ReviewIssues { get; } = [];
+    public ObservableCollection<PenumbraGamePathCandidate> PenumbraGamePathCandidates { get; } = [];
 
     [ObservableProperty] private bool isProcessing;
     [ObservableProperty] private WizardStep currentStep = WizardStep.Workflow;
@@ -115,6 +116,7 @@ public partial class MainWindowViewModel : ObservableObject {
     [ObservableProperty] private string inferredRelativeFolderWarning = string.Empty;
     [ObservableProperty] private string penumbraRelativeScdFolder = "MyPlaylist\\Tracks";
     [ObservableProperty] private string penumbraGamePathsText = "sound/your_playlist_track.scd";
+    [ObservableProperty] private PenumbraGamePathCandidate? selectedPenumbraGamePathCandidate;
     [ObservableProperty] private double progressPercent;
     [ObservableProperty] private string progressText = "0 / 0";
     [ObservableProperty] private string statusText = string.Empty;
@@ -149,6 +151,7 @@ public partial class MainWindowViewModel : ObservableObject {
     public bool ShowAppendPlaylistFields => ShowPenumbraSettings && SelectedPenumbraExportMode == PenumbraPlaylistExportMode.AppendExisting;
     public bool ShowExistingPlaylistSummary => ShowAppendPlaylistFields && !string.IsNullOrWhiteSpace( ExistingPenumbraPlaylistPath );
     public bool ShowInferredRelativeFolderWarning => ShowAppendPlaylistFields && !string.IsNullOrWhiteSpace( InferredRelativeFolderWarning );
+    public bool ShowPenumbraGamePathCandidates => ShowPenumbraSettings && PenumbraGamePathCandidates.Count > 0;
     public bool ShowIntermediateOggOption => !IsRefreshMode;
     public bool IsBuiltInTemplateSelected => SelectedTemplateSourceMode == TemplateSourceMode.BuiltInRecommended;
     public bool IsCustomTemplateSelected => SelectedTemplateSourceMode == TemplateSourceMode.CustomFile;

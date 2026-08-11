@@ -98,6 +98,13 @@ The app can:
 - copy generated `.scd` files into a selected mod
 - create a new playlist JSON
 - append tracks to an existing playlist JSON
+- detect legacy Penumbra v3 mods and the unified Penumbra v4 format planned for Penumbra 1.7
+
+For Penumbra v3, playlists remain separate `group_*.json` files. For Penumbra v4, playlists are stored inside the mod's `meta.json`; new groups and options receive stable GUIDs. Appending to v4 requires selecting that `meta.json` and entering the exact `Single` group name.
+
+When a mod folder is selected, existing SCD game paths are discovered from its playlists and ordered by usage count. The most frequently used path replaces any path remembered from a previously selected mod, while the full candidate list and a manual multi-line override remain available.
+
+Mass SCD Creator does not migrate a v3 mod to v4. That migration remains Penumbra's responsibility. When Mass SCD Creator updates a v4 `meta.json`, it preserves fields it does not own, creates a timestamped `meta.json.massscdcreator-*.bak`, and then replaces the metadata file atomically.
 
 If you do not use Penumbra, you can ignore this part completely.
 

@@ -585,6 +585,9 @@
                                             <Border Style="{StaticResource SubtleCardBorderStyle}" Margin="0,12,0,0" Visibility="{Binding ShowExistingPlaylistSummary, Converter={StaticResource BooleanToVisibilityConverter}}">
                                                 <TextBlock Style="{StaticResource MutedTextStyle}" Text="{Binding ExistingPenumbraPlaylistSummary}" />
                                             </Border>
+                                            <TextBlock Margin="0,14,0,8" Style="{StaticResource FieldLabelStyle}" Text="{Binding Texts[V4PlaylistNameLabel]}" />
+                                            <TextBox Text="{Binding PenumbraPlaylistName, UpdateSourceTrigger=PropertyChanged}" />
+                                            <TextBlock Margin="0,8,0,0" Style="{StaticResource MutedTextStyle}" Text="{Binding Texts[V4PlaylistNameHint]}" />
                                             <Border Style="{StaticResource WarningCardBorderStyle}" Margin="0,12,0,0" Visibility="{Binding ShowInferredRelativeFolderWarning, Converter={StaticResource BooleanToVisibilityConverter}}">
                                                 <TextBlock Foreground="{DynamicResource WarningTextBrush}" Text="{Binding InferredRelativeFolderWarning}" TextWrapping="Wrap" />
                                             </Border>
@@ -592,6 +595,11 @@
                                         <TextBlock Margin="0,18,0,8" Style="{StaticResource FieldLabelStyle}" Text="{Binding Texts[RelativeFolderLabel]}" />
                                         <TextBox Text="{Binding PenumbraRelativeScdFolder, UpdateSourceTrigger=PropertyChanged}" />
                                         <TextBlock Margin="0,8,0,0" Style="{StaticResource MutedTextStyle}" Text="{Binding Texts[RelativeFolderHint]}" />
+                                        <StackPanel Margin="0,18,0,0" Visibility="{Binding ShowPenumbraGamePathCandidates, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                            <TextBlock Margin="0,0,0,8" Style="{StaticResource FieldLabelStyle}" Text="{Binding Texts[ExistingGamePathsLabel]}" />
+                                            <ComboBox ItemsSource="{Binding PenumbraGamePathCandidates}" SelectedItem="{Binding SelectedPenumbraGamePathCandidate}" DisplayMemberPath="DisplayText" />
+                                            <TextBlock Margin="0,8,0,0" Style="{StaticResource MutedTextStyle}" Text="{Binding Texts[ExistingGamePathsHint]}" />
+                                        </StackPanel>
                                         <TextBlock Margin="0,18,0,8" Style="{StaticResource FieldLabelStyle}" Text="{Binding Texts[GamePathsLabel]}" />
                                         <TextBox MinHeight="110" AcceptsReturn="True" VerticalScrollBarVisibility="Auto" Text="{Binding PenumbraGamePathsText, UpdateSourceTrigger=PropertyChanged}" />
                                         <TextBlock Margin="0,8,0,0" Style="{StaticResource MutedTextStyle}" Text="{Binding Texts[GamePathsHint]}" />

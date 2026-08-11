@@ -26,6 +26,15 @@ public sealed class PenumbraExportService : IPenumbraExportService {
             throw new InvalidOperationException( "At least one game path is required for Penumbra export." );
         }
 
+        var modFileVersion = PenumbraV4MetadataEditor.GetModFileVersion( options.ModRootPath );
+        if( modFileVersion > PenumbraV4MetadataEditor.SupportedFileVersion ) {
+            throw new InvalidOperationException(
+                $"Penumbra meta.json file version {modFileVersion} is newer than the supported v{PenumbraV4MetadataEditor.SupportedFileVersion} format." );
+        }
+        if( modFileVersion == PenumbraV4MetadataEditor.SupportedFileVersion ) {
+            PenumbraV4MetadataEditor.ValidateExport( options );
+        }
+
         var relativeFolder = NormalizeRelativeFolder( options.RelativeScdFolder );
         var targetFolder = Path.Combine( options.ModRootPath, relativeFolder );
         Directory.CreateDirectory( targetFolder );
@@ -55,6 +64,10 @@ public sealed class PenumbraExportService : IPenumbraExportService {
                 Name = Path.GetFileNameWithoutExtension( fileName ),
                 Files = files
             } );
+        }
+
+        if( modFileVersion == PenumbraV4MetadataEditor.SupportedFileVersion ) {
+            return Task.FromResult( PenumbraV4MetadataEditor.Export( options, entries ) );
         }
 
         if( options.ExportMode == PenumbraPlaylistExportMode.AppendExisting ) {
@@ -247,11 +260,12 @@ public sealed class PenumbraExportService : IPenumbraExportService {
         public List<PenumbraPlaylistOption> Options { get; set; } = [];
     }
 
-    private sealed class PenumbraPlaylistOption {
-        public string? Name { get; set; }
-        public string? Description { get; set; } = string.Empty;
-        public Dictionary<string, string>? Files { get; set; } = [];
-        public Dictionary<string, string>? FileSwaps { get; set; } = [];
-        public List<object>? Manipulations { get; set; } = [];
-    }
+}
+
+internal sealed class PenumbraPlaylistOption {
+    public string? Name { get; set; }
+    public string? Description { get; set; } = string.Empty;
+    public Dictionary<string, string>? Files { get; set; } = [];
+    public Dictionary<string, string>? FileSwaps { get; set; } = [];
+    public List<object>? Manipulations { get; set; } = [];
 }
