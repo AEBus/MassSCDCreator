@@ -56,6 +56,8 @@ public partial class DesktopBootstrap : Application {
         SetSystemBrush( SystemColors.ControlBrushKey, dark ? "#24303B" : "#FFFFFF" );
         SetSystemBrush( SystemColors.ControlTextBrushKey, dark ? "#E7EEF5" : "#11253A" );
         SetSystemBrush( SystemColors.GrayTextBrushKey, dark ? "#DCE8F4" : "#11253A" );
+        SetSystemBrush( SystemColors.InfoBrushKey, dark ? "#15202B" : "#FFFFFF" );
+        SetSystemBrush( SystemColors.InfoTextBrushKey, dark ? "#E9F0F6" : "#0F2135" );
         SetSystemBrush( SystemColors.HighlightBrushKey, dark ? "#7A94B1" : "#4C87C8" );
         SetSystemBrush( SystemColors.HighlightTextBrushKey, dark ? "#0C1722" : "#FFFFFF" );
         SetSystemBrush( SystemColors.InactiveSelectionHighlightBrushKey, dark ? "#6E88A4" : "#DCE7F2" );
@@ -115,7 +117,7 @@ public partial class DesktopBootstrap : Application {
                 return;
             }
 
-            // Startup prompts are annoying, but shipping a desktop tool that immediately faceplants on first run is more annoying.
+            // Offer ffmpeg setup before the first conversion needs it.
             var prompt = "FFmpeg was not found in PATH or in the Tools folder.\n\nYes: download now to Tools/ffmpeg\nNo: skip for now\nCancel: skip this check next time";
             var result = MessageBox.Show( owner, prompt, "Mass SCD Creator", MessageBoxButton.YesNoCancel, MessageBoxImage.Question );
             if( result == MessageBoxResult.Cancel ) {

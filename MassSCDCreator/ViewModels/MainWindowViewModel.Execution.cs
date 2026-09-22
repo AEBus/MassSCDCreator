@@ -21,13 +21,12 @@ public partial class MainWindowViewModel {
         try {
             var request = BuildRequest();
             IsProcessing = true;
-            CurrentStep = WizardStep.Result;
+            HasRun = true;
             IsLogExpanded = true;
             ProgressPercent = 0;
             ProgressText = "0 / 0";
             StatusText = Texts["StatusRunning"];
             SummaryText = Texts["SummaryProcessing"];
-            ResultHeadline = Texts["ResultRunningTitle"];
             ResultOutputFolderPath = ResolveOutputFolder( request );
             ResultPlaylistPath = string.Empty;
             ClearLog();
@@ -45,22 +44,15 @@ public partial class MainWindowViewModel {
             ResultPlaylistPath = result.ExportedPlaylistPath ?? string.Empty;
             SummaryText = BuildResultSummary( result );
             StatusText = result.WasCancelled ? Texts["StatusCancelled"] : Texts["StatusCompleted"];
-            ResultHeadline = result.WasCancelled
-                ? Texts["ResultCancelledTitle"]
-                : result.ErrorCount == 0
-                    ? Texts["ResultSuccessTitle"]
-                    : Texts["ResultPartialTitle"];
         }
         catch( OperationCanceledException ) {
             SummaryText = Texts["ResultCancelledTitle"];
             StatusText = Texts["StatusCancelled"];
-            ResultHeadline = Texts["ResultCancelledTitle"];
             _logger.Info( "Operation cancelled by user." );
         }
         catch( Exception ex ) {
             SummaryText = ex.Message;
             StatusText = Texts["StatusError"];
-            ResultHeadline = Texts["ResultErrorTitle"];
             _logger.Error( ex.ToString() );
             MessageBox.Show( ex.Message, Texts["WindowTitle"], MessageBoxButton.OK, MessageBoxImage.Error );
         }
@@ -72,7 +64,7 @@ public partial class MainWindowViewModel {
         }
     }
 
-    private bool CanStartProcessing() => !IsProcessing && CurrentStep == WizardStep.Review && ReviewIssues.Count == 0;
+    private bool CanStartProcessing() => !IsProcessing && BlockingIssues.Count == 0;
 
     [RelayCommand( CanExecute = nameof( CanCancel ) )]
     private void Cancel() {
@@ -82,19 +74,18 @@ public partial class MainWindowViewModel {
     private bool CanCancel() => IsProcessing;
 
     private void RefreshValidationIssues() {
-        ReplaceIssues( WorkflowIssues );
         ReplaceIssues( PathsIssues, GetPathIssues() );
         ReplaceIssues( TemplateIssues, GetTemplateIssues() );
         ReplaceIssues( PenumbraIssues, GetPenumbraIssues() );
 
-        var reviewIssues = new List<string>();
-        reviewIssues.AddRange( PathsIssues );
-        reviewIssues.AddRange( TemplateIssues );
-        if( ShowPenumbraStep ) {
-            reviewIssues.AddRange( PenumbraIssues );
+        var blockingIssues = new List<string>();
+        blockingIssues.AddRange( PathsIssues );
+        blockingIssues.AddRange( TemplateIssues );
+        if( ShowPenumbraSection ) {
+            blockingIssues.AddRange( PenumbraIssues );
         }
 
-        ReplaceIssues( ReviewIssues, reviewIssues );
+        ReplaceIssues( BlockingIssues, blockingIssues );
     }
 
     private IEnumerable<string> GetPathIssues() {
@@ -121,6 +112,10 @@ public partial class MainWindowViewModel {
         }
 
         if( !ShowOutputSelection ) {
+            if( ShowOutputOption && !PenumbraExportEnabled ) {
+                yield return Texts["ValidationOutputOrPenumbraRequired"];
+            }
+
             yield break;
         }
 
@@ -171,7 +166,7 @@ public partial class MainWindowViewModel {
     }
 
     private IEnumerable<string> GetPenumbraIssues() {
-        if( !ShowPenumbraStep || !PenumbraExportEnabled ) {
+        if( !ShowPenumbraSection || !PenumbraExportEnabled ) {
             yield break;
         }
 
@@ -199,14 +194,15 @@ public partial class MainWindowViewModel {
     }
 
     private ProcessRequest BuildRequest() {
-        if( ReviewIssues.Count > 0 ) {
-            throw new InvalidOperationException( ReviewIssues[0] );
+        if( BlockingIssues.Count > 0 ) {
+            throw new InvalidOperationException( BlockingIssues[0] );
         }
 
         return new ProcessRequest {
             Mode = SelectedMode,
             InputPath = InputPath.Trim(),
-            OutputPath = IsRefreshMode ? string.Empty : OutputPath.Trim(),
+            // Empty OutputPath requests temporary storage until the Penumbra export finishes.
+            OutputPath = IsRefreshMode || !UseCustomOutputPath ? string.Empty : OutputPath.Trim(),
             TemplateSourceMode = SelectedTemplateSourceMode,
             TemplateScdPath = SelectedTemplateSourceMode == TemplateSourceMode.CustomFile ? TemplateScdPath.Trim() : string.Empty,
             Conversion = new OggConversionOptions {
@@ -216,12 +212,13 @@ public partial class MainWindowViewModel {
                 QualityLevel = ParseQuality(),
                 NominalBitrateKbps = ParseNominalBitrate(),
                 EnableLoop = EnableLoop,
+                NormalizeLoudness = NormalizeLoudness,
                 SaveIntermediateOggFiles = SaveIntermediateOggFiles,
                 RecursiveSearchEnabled = RecursiveSearchEnabled,
                 FfmpegPath = IsFfmpegRequiredForSelectedAudioProfile() && !string.IsNullOrWhiteSpace( FfmpegPath ) ? FfmpegPath.Trim() : null
             },
             PenumbraExport = new PenumbraExportOptions {
-                Enabled = ShowPenumbraStep && PenumbraExportEnabled,
+                Enabled = ShowPenumbraSection && PenumbraExportEnabled,
                 ModRootPath = PenumbraModRootPath.Trim(),
                 ExportMode = SelectedPenumbraExportMode,
                 PlaylistName = PenumbraPlaylistName.Trim(),
@@ -289,17 +286,6 @@ public partial class MainWindowViewModel {
             .ToArray();
     }
 
-    private string BuildReviewChecklistText() {
-        var builder = new StringBuilder();
-        builder.AppendLine( $"{Texts["SummaryMode"]}: {SummaryModeValue}" );
-        builder.AppendLine( $"{Texts["SummaryInput"]}: {SummaryInputValue}" );
-        builder.AppendLine( $"{Texts["SummaryOutput"]}: {SummaryOutputValue}" );
-        builder.AppendLine( $"{Texts["SummaryTemplate"]}: {SummaryTemplateValue}" );
-        builder.AppendLine( $"{Texts["SummaryAudio"]}: {SummaryAudioValue}" );
-        builder.Append( $"{Texts["SummaryExport"]}: {SummaryPenumbraValue}" );
-        return builder.ToString();
-    }
-
     private string BuildResultSummary( BatchProcessResult result ) {
         var builder = new StringBuilder();
         builder.Append( Texts.Format( "ResultSummaryCounts", result.SuccessCount, result.ErrorCount, result.TotalCount ) );
@@ -312,11 +298,17 @@ public partial class MainWindowViewModel {
     }
 
     private string ResolveOutputFolder( ProcessRequest request ) {
-        if( request.Mode == ProcessingMode.SingleFile ) {
-            return Path.GetDirectoryName( request.OutputPath ) ?? string.Empty;
+        if( request.Mode == ProcessingMode.RepairScdFolder ) {
+            return request.InputPath;
         }
 
-        return request.Mode == ProcessingMode.RepairScdFolder ? request.InputPath : request.OutputPath;
+        if( string.IsNullOrWhiteSpace( request.OutputPath ) ) {
+            return request.PenumbraExport.ModRootPath;
+        }
+
+        return request.Mode == ProcessingMode.SingleFile
+            ? Path.GetDirectoryName( request.OutputPath ) ?? string.Empty
+            : request.OutputPath;
     }
 
     private static void ReplaceIssues( ObservableCollection<string> target, IEnumerable<string>? source = null ) {
@@ -327,49 +319,6 @@ public partial class MainWindowViewModel {
 
         foreach( var issue in source.Distinct() ) {
             target.Add( issue );
-        }
-    }
-
-    private string TryDescribePenumbraPlaylist( string path ) {
-        if( string.IsNullOrWhiteSpace( path ) ) {
-            return Texts["ExistingPlaylistSummaryEmpty"];
-        }
-
-        if( !File.Exists( path ) ) {
-            return Texts["ExistingPlaylistSummaryMissing"];
-        }
-
-        try {
-            using var stream = File.OpenRead( path );
-            using var document = JsonDocument.Parse( stream );
-            var root = document.RootElement;
-
-            if( IsV4MetadataRoot( root ) ) {
-                var groups = GetV4SingleGroups( root );
-                if( groups.Count == 0 ) {
-                    return Texts["ExistingV4MetaNoPlaylists"];
-                }
-
-                var details = string.Join( ", ", groups.Select( group => $"{group.Name} ({group.Options.GetArrayLength()})" ) );
-                return Texts.Format( "ExistingV4MetaSummary", details );
-            }
-
-            var name = root.TryGetProperty( "Name", out var nameElement ) && nameElement.ValueKind == JsonValueKind.String
-                ? nameElement.GetString()
-                : null;
-            var type = root.TryGetProperty( "Type", out var typeElement ) && typeElement.ValueKind == JsonValueKind.String
-                ? typeElement.GetString()
-                : null;
-            var optionsCount = root.TryGetProperty( "Options", out var optionsElement ) && optionsElement.ValueKind == JsonValueKind.Array
-                ? optionsElement.GetArrayLength()
-                : 0;
-
-            var displayName = string.IsNullOrWhiteSpace( name ) ? Path.GetFileNameWithoutExtension( path ) : name;
-            var displayType = string.IsNullOrWhiteSpace( type ) ? "Unknown" : type;
-            return Texts.Format( "ExistingPlaylistSummaryDetails", displayName, displayType, optionsCount );
-        }
-        catch( Exception ex ) {
-            return Texts.Format( "ExistingPlaylistSummaryError", ex.Message );
         }
     }
 
@@ -513,7 +462,7 @@ public partial class MainWindowViewModel {
             return new RelativeFolderAnalysis( string.Empty, false );
         }
 
-        // This is one of those "be boring on purpose" heuristics. Playlist JSON in the wild is messy, and the most common folder is usually the least surprising default.
+        // Mixed playlists use the most common folder as the suggested destination.
         var groupedFolders = candidateFolders
             .GroupBy( folder => folder, StringComparer.OrdinalIgnoreCase )
             .ToList();
@@ -569,6 +518,10 @@ public partial class MainWindowViewModel {
             SelectedThemeMode = settings.SelectedThemeMode;
             InputPath = settings.InputPath;
             OutputPath = settings.OutputPath;
+            // Preserve custom output paths from settings saved before this flag existed.
+            UseCustomOutputPath = settings.UseCustomOutputPath ??
+                ( !string.IsNullOrWhiteSpace( settings.OutputPath ) &&
+                  !string.Equals( settings.OutputPath, GetSuggestedOutputPath(), StringComparison.OrdinalIgnoreCase ) );
             TemplateScdPath = settings.TemplateScdPath;
             FfmpegPath = settings.FfmpegPath;
             SelectedTemplateSourceMode = settings.SelectedTemplateSourceMode;
@@ -577,6 +530,7 @@ public partial class MainWindowViewModel {
                 : settings.BatchRecursiveSearchEnabled;
             SaveIntermediateOggFiles = settings.SaveIntermediateOggFiles;
             EnableLoop = settings.EnableLoop;
+            NormalizeLoudness = settings.NormalizeLoudness;
             SelectedAudioProfileMode = ResolveAudioProfileModeFromSettings( settings );
             SelectedAdvancedMode = settings.SelectedAdvancedMode;
             AdvancedValue = settings.AdvancedValue;
@@ -601,7 +555,8 @@ public partial class MainWindowViewModel {
 
         var savedGamePaths = PenumbraGamePathsText;
         RefreshPenumbraGamePathCandidates( PenumbraModRootPath, true );
-        ExistingPenumbraPlaylistSummary = TryDescribePenumbraPlaylist( ExistingPenumbraPlaylistPath );
+        RefreshPenumbraPlaylistCandidates( PenumbraModRootPath );
+        RestoreSelectedPlaylistFromSettings();
         CoerceAdvancedValue();
         _outputPathManagedByWizard = string.IsNullOrWhiteSpace( OutputPath );
         if( !string.Equals( savedGamePaths, PenumbraGamePathsText, StringComparison.Ordinal ) ) {
@@ -609,6 +564,18 @@ public partial class MainWindowViewModel {
         }
     }
 
+
+    private void RestoreSelectedPlaylistFromSettings() {
+        if( string.IsNullOrWhiteSpace( ExistingPenumbraPlaylistPath ) ) {
+            return;
+        }
+
+        var match = PenumbraPlaylistCandidates.FirstOrDefault( candidate =>
+            string.Equals( candidate.Path, ExistingPenumbraPlaylistPath, StringComparison.OrdinalIgnoreCase ) &&
+            ( !candidate.IsV4 || string.Equals( candidate.GroupName, PenumbraPlaylistName, StringComparison.OrdinalIgnoreCase ) ) );
+
+        RunSilently( () => SelectedPenumbraPlaylistCandidate = match );
+    }
     private void SaveSettings() {
         if( _settingsService is null ) {
             return;
@@ -619,6 +586,7 @@ public partial class MainWindowViewModel {
         settings.SelectedThemeMode = SelectedThemeMode;
         settings.InputPath = InputPath;
         settings.OutputPath = OutputPath;
+        settings.UseCustomOutputPath = UseCustomOutputPath;
         settings.TemplateScdPath = TemplateScdPath;
         settings.FfmpegPath = FfmpegPath;
         settings.SelectedTemplateSourceMode = SelectedTemplateSourceMode;
@@ -631,6 +599,7 @@ public partial class MainWindowViewModel {
 
         settings.SaveIntermediateOggFiles = SaveIntermediateOggFiles;
         settings.EnableLoop = EnableLoop;
+        settings.NormalizeLoudness = NormalizeLoudness;
         settings.SelectedAudioProfileMode = SelectedAudioProfileMode;
         settings.UsePresetMode = SelectedAudioProfileMode != AudioProfileMode.Custom;
         settings.SelectedPresetMode = OggPresetMode.HighQualityCompatible;
@@ -656,7 +625,16 @@ public partial class MainWindowViewModel {
         settings.WindowWidth = _windowWidth;
         settings.WindowHeight = _windowHeight;
         settings.IsWindowMaximized = _isWindowMaximized;
-        _settingsService.Save( settings );
+        // Autosave runs on every edit. Keep the UI usable if saving fails and report the failure once.
+        try {
+            _settingsService.Save( settings );
+        }
+        catch( Exception ex ) {
+            if( !_settingsSaveFailureReported ) {
+                _settingsSaveFailureReported = true;
+                _logger.Error( $"Settings could not be saved, continuing without persistence: {ex.Message}" );
+            }
+        }
     }
 
     private void OnEntryLogged( LogEntry entry ) {

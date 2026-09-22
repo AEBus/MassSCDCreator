@@ -46,6 +46,9 @@ public sealed class FfmpegInstaller : IFfmpegInstaller {
             var extractedExePath = Path.Combine( tempPath, "ffmpeg.exe" );
             ffmpegEntry.ExtractToFile( extractedExePath, true );
 
+            // Validate before installation so a rejected build cannot be reused on the next run.
+            await ValidateRequiredFormatSupportAsync( extractedExePath, cancellationToken );
+
             foreach( var oldFile in Directory.EnumerateFiles( rootPath, "*.exe", SearchOption.TopDirectoryOnly ) ) {
                 try {
                     File.Delete( oldFile );
@@ -55,8 +58,6 @@ public sealed class FfmpegInstaller : IFfmpegInstaller {
             }
 
             File.Copy( extractedExePath, outputPath, true );
-
-            await ValidateRequiredFormatSupportAsync( outputPath, cancellationToken );
             return outputPath;
         }
         finally {
@@ -98,6 +99,18 @@ public sealed class FfmpegInstaller : IFfmpegInstaller {
         };
 
         using var process = Process.Start( psi ) ?? throw new InvalidOperationException( $"Could not start process: {fileName}" );
+
+        // Cancelling WaitForExitAsync does not stop ffmpeg; terminate the process explicitly.
+        using var registration = cancellationToken.Register( () => {
+            try {
+                if( !process.HasExited ) {
+                    process.Kill( true );
+                }
+            }
+            catch {
+            }
+        } );
+
         var stdoutTask = process.StandardOutput.ReadToEndAsync( cancellationToken );
         var stderrTask = process.StandardError.ReadToEndAsync( cancellationToken );
         await process.WaitForExitAsync( cancellationToken );

@@ -17,6 +17,10 @@ using MassSCDCreator.Services.Settings;
 namespace MassSCDCreator.ViewModels;
 
 public partial class MainWindowViewModel : ObservableObject {
+    private const string ExpandedChevron = "\u25BE";
+    private const string CollapsedChevron = "\u25B8";
+    private const string SummarySeparator = " \u00B7 ";
+
     private readonly IFileDialogService _dialogService;
     private readonly IFileBatchProcessor _batchProcessor;
     private readonly ILoggerService _logger;
@@ -29,6 +33,7 @@ public partial class MainWindowViewModel : ObservableObject {
     private readonly DispatcherTimer _logFlushTimer;
     private CancellationTokenSource? _cts;
     private bool _suspendReactions;
+    private bool _settingsSaveFailureReported;
     private string _lastSuggestedOutputPath = string.Empty;
     private bool _outputPathManagedByWizard = true;
     private double? _windowLeft;
@@ -49,20 +54,10 @@ public partial class MainWindowViewModel : ObservableObject {
         _logFlushTimer.Tick += ( _, _ ) => FlushPendingLogEntries();
 
         Texts = new UiTextCatalog();
-        Steps = [
-            new WizardStepItemViewModel { Step = WizardStep.Workflow, Number = 1, TitleKey = "StepWorkflowTitle", DescriptionKey = "StepWorkflowDesc" },
-            new WizardStepItemViewModel { Step = WizardStep.Paths, Number = 2, TitleKey = "StepPathsTitle", DescriptionKey = "StepPathsDesc" },
-            new WizardStepItemViewModel { Step = WizardStep.TemplateAudio, Number = 3, TitleKey = "StepTemplateTitle", DescriptionKey = "StepTemplateDesc" },
-            new WizardStepItemViewModel { Step = WizardStep.Penumbra, Number = 4, TitleKey = "StepPenumbraTitle", DescriptionKey = "StepPenumbraDesc" },
-            new WizardStepItemViewModel { Step = WizardStep.Review, Number = 5, TitleKey = "StepReviewTitle", DescriptionKey = "StepReviewDesc" },
-            new WizardStepItemViewModel { Step = WizardStep.Result, Number = 6, TitleKey = "StepResultTitle", DescriptionKey = "StepResultDesc" }
-        ];
 
         PropertyChanged += HandlePropertyChanged;
-        ExistingPenumbraPlaylistSummary = Texts["ExistingPlaylistSummaryEmpty"];
         StatusText = Texts["StatusReady"];
         SummaryText = Texts["SummaryNoOperations"];
-        ResultHeadline = Texts["ResultIdleTitle"];
         RefreshState();
     }
 
@@ -81,20 +76,20 @@ public partial class MainWindowViewModel : ObservableObject {
     }
 
     public UiTextCatalog Texts { get; }
-    public ObservableCollection<WizardStepItemViewModel> Steps { get; }
-    public ObservableCollection<string> WorkflowIssues { get; } = [];
     public ObservableCollection<string> PathsIssues { get; } = [];
     public ObservableCollection<string> TemplateIssues { get; } = [];
     public ObservableCollection<string> PenumbraIssues { get; } = [];
-    public ObservableCollection<string> ReviewIssues { get; } = [];
+    public ObservableCollection<string> BlockingIssues { get; } = [];
     public ObservableCollection<PenumbraGamePathCandidate> PenumbraGamePathCandidates { get; } = [];
+    public ObservableCollection<PenumbraPlaylistCandidate> PenumbraPlaylistCandidates { get; } = [];
 
     [ObservableProperty] private bool isProcessing;
-    [ObservableProperty] private WizardStep currentStep = WizardStep.Workflow;
+    [ObservableProperty] private bool hasRun;
     [ObservableProperty] private ProcessingMode selectedMode = ProcessingMode.SingleFile;
     [ObservableProperty] private ThemeMode selectedThemeMode = ThemeMode.System;
     [ObservableProperty] private string inputPath = string.Empty;
     [ObservableProperty] private string outputPath = string.Empty;
+    [ObservableProperty] private bool useCustomOutputPath;
     [ObservableProperty] private bool recursiveSearchEnabled;
     [ObservableProperty] private TemplateSourceMode selectedTemplateSourceMode = TemplateSourceMode.BuiltInRecommended;
     [ObservableProperty] private string templateScdPath = string.Empty;
@@ -106,38 +101,36 @@ public partial class MainWindowViewModel : ObservableObject {
     [ObservableProperty] private string advancedValue = "9";
     [ObservableProperty] private ExistingScdRefreshAction selectedExistingScdRefreshAction = ExistingScdRefreshAction.MatchTemplateOnly;
     [ObservableProperty] private bool enableLoop;
+    [ObservableProperty] private bool normalizeLoudness = true;
     [ObservableProperty] private bool saveIntermediateOggFiles;
     [ObservableProperty] private bool penumbraExportEnabled;
     [ObservableProperty] private string penumbraModRootPath = string.Empty;
     [ObservableProperty] private PenumbraPlaylistExportMode selectedPenumbraExportMode = PenumbraPlaylistExportMode.CreateNew;
     [ObservableProperty] private string penumbraPlaylistName = string.Empty;
     [ObservableProperty] private string existingPenumbraPlaylistPath = string.Empty;
-    [ObservableProperty] private string existingPenumbraPlaylistSummary = string.Empty;
     [ObservableProperty] private string inferredRelativeFolderWarning = string.Empty;
     [ObservableProperty] private string penumbraRelativeScdFolder = "MyPlaylist\\Tracks";
     [ObservableProperty] private string penumbraGamePathsText = "sound/your_playlist_track.scd";
     [ObservableProperty] private PenumbraGamePathCandidate? selectedPenumbraGamePathCandidate;
+    [ObservableProperty] private PenumbraPlaylistCandidate? selectedPenumbraPlaylistCandidate;
     [ObservableProperty] private double progressPercent;
     [ObservableProperty] private string progressText = "0 / 0";
     [ObservableProperty] private string statusText = string.Empty;
     [ObservableProperty] private string summaryText = string.Empty;
-    [ObservableProperty] private string resultHeadline = string.Empty;
     [ObservableProperty] private string resultOutputFolderPath = string.Empty;
     [ObservableProperty] private string resultPlaylistPath = string.Empty;
+    [ObservableProperty] private bool isAudioExpanded;
+    [ObservableProperty] private bool isPenumbraExpanded;
     [ObservableProperty] private bool isLogExpanded;
     [ObservableProperty] private string logText = string.Empty;
 
     public bool IsSingleMode => SelectedMode == ProcessingMode.SingleFile;
     public bool IsBatchMode => SelectedMode == ProcessingMode.BatchFolder;
     public bool IsRefreshMode => SelectedMode == ProcessingMode.RepairScdFolder;
-    public bool IsWorkflowStepActive => CurrentStep == WizardStep.Workflow;
-    public bool IsPathsStepActive => CurrentStep == WizardStep.Paths;
-    public bool IsTemplateAudioStepActive => CurrentStep == WizardStep.TemplateAudio;
-    public bool IsPenumbraStepActive => CurrentStep == WizardStep.Penumbra;
-    public bool IsReviewStepActive => CurrentStep == WizardStep.Review;
-    public bool IsResultStepActive => CurrentStep == WizardStep.Result;
-    public bool ShowPenumbraStep => !IsRefreshMode;
-    public bool ShowOutputSelection => !IsRefreshMode;
+    public bool ShowPenumbraSection => !IsRefreshMode;
+    public bool ShowOutputOption => !IsRefreshMode;
+    public bool ShowOutputSelection => !IsRefreshMode && UseCustomOutputPath;
+    public bool ShowOutputGoesToPenumbra => ShowOutputOption && !UseCustomOutputPath;
     public bool ShowTemplateCurrentOption => IsRefreshMode;
     public bool ShowTemplatePathSelection => SelectedTemplateSourceMode == TemplateSourceMode.CustomFile;
     public bool ShowRefreshActionSelection => IsRefreshMode;
@@ -146,13 +139,15 @@ public partial class MainWindowViewModel : ObservableObject {
     public bool ShowCustomAudioOptions => ShowAudioEncodingOptions && SelectedAudioProfileMode == AudioProfileMode.Custom;
     public bool ShowOriginalOggHint => ShowAudioEncodingOptions && SelectedAudioProfileMode == AudioProfileMode.OriginalOgg;
     public bool ShowFfmpegStatus => ShowFfmpegOptions && !string.IsNullOrWhiteSpace( FfmpegInstallStatus );
-    public bool ShowPenumbraSettings => ShowPenumbraStep && PenumbraExportEnabled;
+    public bool ShowPenumbraSettings => ShowPenumbraSection && PenumbraExportEnabled;
     public bool ShowCreatePlaylistFields => ShowPenumbraSettings && SelectedPenumbraExportMode == PenumbraPlaylistExportMode.CreateNew;
     public bool ShowAppendPlaylistFields => ShowPenumbraSettings && SelectedPenumbraExportMode == PenumbraPlaylistExportMode.AppendExisting;
-    public bool ShowExistingPlaylistSummary => ShowAppendPlaylistFields && !string.IsNullOrWhiteSpace( ExistingPenumbraPlaylistPath );
+    public bool HasPenumbraPlaylistCandidates => PenumbraPlaylistCandidates.Count > 0;
+    public bool ShowNoPlaylistsFound => ShowAppendPlaylistFields && !string.IsNullOrWhiteSpace( PenumbraModRootPath ) && PenumbraPlaylistCandidates.Count == 0;
     public bool ShowInferredRelativeFolderWarning => ShowAppendPlaylistFields && !string.IsNullOrWhiteSpace( InferredRelativeFolderWarning );
     public bool ShowPenumbraGamePathCandidates => ShowPenumbraSettings && PenumbraGamePathCandidates.Count > 0;
-    public bool ShowIntermediateOggOption => !IsRefreshMode;
+    public bool ShowIntermediateOggOption => !IsRefreshMode && UseCustomOutputPath;
+    public bool ShowResultActions => HasRun && !IsProcessing;
     public bool IsBuiltInTemplateSelected => SelectedTemplateSourceMode == TemplateSourceMode.BuiltInRecommended;
     public bool IsCustomTemplateSelected => SelectedTemplateSourceMode == TemplateSourceMode.CustomFile;
     public bool IsCurrentTemplateSelected => SelectedTemplateSourceMode == TemplateSourceMode.CurrentFile;
@@ -172,13 +167,43 @@ public partial class MainWindowViewModel : ObservableObject {
     public bool HasPathsIssues => PathsIssues.Count > 0;
     public bool HasTemplateIssues => TemplateIssues.Count > 0;
     public bool HasPenumbraIssues => PenumbraIssues.Count > 0;
-    public bool HasReviewIssues => ReviewIssues.Count > 0;
-    public bool CanToggleLog => !string.IsNullOrWhiteSpace( LogText );
+    public bool HasBlockingIssues => BlockingIssues.Count > 0;
+
+    public string AudioChevron => IsAudioExpanded ? ExpandedChevron : CollapsedChevron;
+    public string PenumbraChevron => IsPenumbraExpanded ? ExpandedChevron : CollapsedChevron;
+    public string LogChevron => IsLogExpanded ? ExpandedChevron : CollapsedChevron;
+
     public string InputLabel => IsBatchMode ? Texts["InputLabelBatch"] : IsRefreshMode ? Texts["InputLabelRefresh"] : Texts["InputLabelSingle"];
     public string OutputLabel => IsBatchMode ? Texts["OutputLabelBatch"] : Texts["OutputLabelSingle"];
     public string AdvancedModeHint => SelectedAdvancedMode == OggAdvancedMode.QualityVbr
         ? Texts["AudioCustomValueHintQuality"]
         : Texts["AudioCustomValueHintBitrate"];
+
+    public string LogSummary => string.IsNullOrWhiteSpace( LogText )
+        ? Texts["LogEmpty"]
+        : Texts.Format( "LogLineCount", LogText.Count( character => character == '\n' ) + 1 );
+
+    public string ActionBarDetailText {
+        get {
+            if( IsProcessing ) {
+                return ProgressText;
+            }
+
+            return BlockingIssues.Count > 0 ? BlockingIssues[0] : SummaryText;
+        }
+    }
+
+    // Validation takes precedence over the previous run's status when Start is blocked.
+    public string ActionBarHeadlineText {
+        get {
+            if( IsProcessing ) {
+                return StatusText;
+            }
+
+            return BlockingIssues.Count > 0 ? Texts["StatusNotReady"] : StatusText;
+        }
+    }
+
     public double AdvancedQualitySliderValue {
         get {
             if( !double.TryParse( AdvancedValue, NumberStyles.Float, CultureInfo.InvariantCulture, out var parsedValue ) ) {
@@ -195,9 +220,7 @@ public partial class MainWindowViewModel : ObservableObject {
             }
         }
     }
-    public string SummaryModeValue => IsBatchMode ? Texts["ModeBatchTitle"] : IsRefreshMode ? Texts["ModeRefreshTitle"] : Texts["ModeSingleTitle"];
-    public string SummaryInputValue => string.IsNullOrWhiteSpace( InputPath ) ? Texts["SummaryNotConfigured"] : InputPath;
-    public string SummaryOutputValue => IsRefreshMode ? Texts["RefreshInPlaceHint"] : string.IsNullOrWhiteSpace( OutputPath ) ? Texts["SummaryNotConfigured"] : OutputPath;
+
     public string SummaryTemplateValue => SelectedTemplateSourceMode switch {
         TemplateSourceMode.CustomFile => string.IsNullOrWhiteSpace( TemplateScdPath ) ? Texts["TemplateSummaryCustom"] : TemplateScdPath,
         TemplateSourceMode.CurrentFile => Texts["TemplateSummaryCurrent"],
@@ -210,9 +233,8 @@ public partial class MainWindowViewModel : ObservableObject {
             _ => BuildAudioEncodingSummary( Texts["RefreshActionSummaryTemplateAndAudio"] )
         }
         : BuildAudioEncodingSummary();
-    public string SummaryPenumbraValue => !ShowPenumbraStep || !PenumbraExportEnabled ? Texts["PenumbraOff"] : SelectedPenumbraExportMode == PenumbraPlaylistExportMode.AppendExisting ? Texts["PenumbraAppendSummary"] : Texts["PenumbraCreateSummary"];
-    public string SummaryValidationValue => ReviewIssues.Count == 0 ? Texts["ValidationReady"] : $"{Texts["ValidationAttention"]}: {ReviewIssues.Count}";
-    public string ReviewChecklistText => BuildReviewChecklistText();
+    public string SummaryPenumbraValue => !ShowPenumbraSection || !PenumbraExportEnabled ? Texts["PenumbraOff"] : SelectedPenumbraExportMode == PenumbraPlaylistExportMode.AppendExisting ? Texts["PenumbraAppendSummary"] : Texts["PenumbraCreateSummary"];
+    public string AudioSectionSummary => SummaryTemplateValue + SummarySeparator + SummaryAudioValue;
 
     private string BuildAudioEncodingSummary( string? prefix = null ) {
         var details = SelectedAudioProfileMode switch {

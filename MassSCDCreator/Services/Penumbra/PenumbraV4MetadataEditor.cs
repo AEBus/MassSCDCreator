@@ -46,7 +46,7 @@ internal static class PenumbraV4MetadataEditor {
         }
 
         root["LastWrite"] = DateTime.UtcNow;
-        WriteMetadataWithBackup( metaPath, root );
+        WriteJsonWithBackup( metaPath, root );
         return metaPath;
     }
 
@@ -239,10 +239,20 @@ internal static class PenumbraV4MetadataEditor {
         }
     }
 
-    private static void WriteMetadataWithBackup( string metaPath, JsonObject root ) {
+    // Preserve the BOM, indentation and line endings to avoid unrelated changes to the mod's JSON.
+    internal static void WriteJsonWithBackup( string metaPath, JsonObject root ) {
         var timestamp = DateTime.UtcNow.ToString( "yyyyMMdd'T'HHmmssfff'Z'" );
         var backupPath = $"{metaPath}.massscdcreator-{timestamp}.bak";
+
+        // Multiple appends within one millisecond need distinct backup names.
+        for( var attempt = 2; File.Exists( backupPath ); attempt++ ) {
+            backupPath = $"{metaPath}.massscdcreator-{timestamp}-{attempt:D2}.bak";
+        }
+
         var temporaryPath = $"{metaPath}.massscdcreator-{Guid.NewGuid():N}.tmp";
+        var hadBom = HasUtf8Bom( metaPath );
+        var usedTabs = IsTabIndented( metaPath );
+        var usedCrLf = UsesCrLfLineEndings( metaPath );
         File.Copy( metaPath, backupPath, false );
 
         try {
@@ -250,13 +260,120 @@ internal static class PenumbraV4MetadataEditor {
                 WriteIndented = true,
                 Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
             };
-            File.WriteAllText( temporaryPath, root.ToJsonString( jsonOptions ), new UTF8Encoding( false ) );
-            File.Replace( temporaryPath, metaPath, null );
+
+            // .NET 8's Utf8JsonWriter uses Environment.NewLine; restore the source line endings explicitly.
+            var json = root.ToJsonString( jsonOptions );
+            if( !usedCrLf ) {
+                json = json.Replace( "\r\n", "\n", StringComparison.Ordinal );
+            }
+
+            if( usedTabs ) {
+                json = ConvertLeadingSpacesToTabs( json );
+            }
+
+            File.WriteAllText( temporaryPath, json, new UTF8Encoding( hadBom ) );
+            ReplaceWithRetry( temporaryPath, metaPath );
+            PruneOwnBackups( metaPath );
         }
         finally {
             if( File.Exists( temporaryPath ) ) {
                 File.Delete( temporaryPath );
             }
         }
+    }
+
+
+
+    // Penumbra or antivirus scanners can briefly lock the target. Retry before failing the export.
+    private static void ReplaceWithRetry( string temporaryPath, string metaPath ) {
+        const int attempts = 4;
+        for( var attempt = 1; ; attempt++ ) {
+            try {
+                File.Replace( temporaryPath, metaPath, null );
+                return;
+            }
+            catch( IOException ) when ( attempt < attempts ) {
+                Thread.Sleep( 50 * attempt );
+            }
+            catch( UnauthorizedAccessException ) when ( attempt < attempts ) {
+                Thread.Sleep( 50 * attempt );
+            }
+        }
+    }
+    private const int BackupsToKeep = 3;
+
+    // Each append backs up the full JSON file, so limit retained copies.
+    private static void PruneOwnBackups( string metaPath ) {
+        var directory = Path.GetDirectoryName( metaPath );
+        if( string.IsNullOrEmpty( directory ) ) {
+            return;
+        }
+
+        try {
+            // Match only our backup names; preserve Penumbra migration backups and other user files.
+            var ownBackups = Directory.GetFiles( directory, $"{Path.GetFileName( metaPath )}.massscdcreator-*.bak" );
+            foreach( var stale in ownBackups.OrderByDescending( path => path, StringComparer.Ordinal ).Skip( BackupsToKeep ) ) {
+                try {
+                    File.Delete( stale );
+                }
+                catch {
+                }
+            }
+        }
+        catch {
+        }
+    }
+    private static bool HasUtf8Bom( string path ) {
+        using var stream = File.OpenRead( path );
+        Span<byte> head = stackalloc byte[3];
+        return stream.ReadAtLeast( head, 3, false ) == 3 && head[0] == 0xEF && head[1] == 0xBB && head[2] == 0xBF;
+    }
+
+
+    private static bool UsesCrLfLineEndings( string path ) {
+        using var reader = new StreamReader( path );
+        var previous = -1;
+        while( reader.Read() is var current and >= 0 ) {
+            if( current == '\n' ) {
+                return previous == '\r';
+            }
+
+            previous = current;
+        }
+
+        return false;
+    }
+    private static bool IsTabIndented( string path ) {
+        foreach( var line in File.ReadLines( path ) ) {
+            if( line.StartsWith( '\t' ) ) {
+                return true;
+            }
+
+            if( line.StartsWith( ' ' ) ) {
+                return false;
+            }
+        }
+
+        return false;
+    }
+
+    // WriteIndented uses two spaces per level. JSON strings cannot contain raw newlines,
+    // so replacing leading whitespace cannot alter a string value.
+    private static string ConvertLeadingSpacesToTabs( string json ) {
+        var builder = new StringBuilder( json.Length );
+        foreach( var line in json.Split( '\n' ) ) {
+            var spaces = 0;
+            while( spaces < line.Length && line[spaces] == ' ' ) {
+                spaces++;
+            }
+
+            if( builder.Length > 0 ) {
+                builder.Append( '\n' );
+            }
+
+            builder.Append( '\t', spaces / 2 ).Append( line, spaces, line.Length - spaces );
+        }
+
+        return builder.ToString();
     }
 }

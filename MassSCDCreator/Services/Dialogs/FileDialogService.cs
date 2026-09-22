@@ -35,14 +35,4 @@ public sealed class FileDialogService : IFileDialogService {
 
         return dialog.ShowDialog() == true ? dialog.SelectedPath : null;
     }
-
-    public string? PickExistingPlaylistFile( string title ) {
-        var dialog = new OpenFileDialog {
-            Title = title,
-            Filter = "Penumbra playlist metadata (group_*.json;meta.json)|group_*.json;meta.json|JSON files (*.json)|*.json|All files (*.*)|*.*",
-            CheckFileExists = true
-        };
-
-        return dialog.ShowDialog() == true ? dialog.FileName : null;
-    }
 }

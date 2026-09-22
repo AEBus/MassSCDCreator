@@ -81,15 +81,7 @@ public sealed class ScdService : IScdService {
         model.AudioEntries[0] = replacement;
         ApplyLoopMetadata( model, replacement, loopEndSamples, enableLoop );
 
-        Directory.CreateDirectory( Path.GetDirectoryName( outputPath )! );
-        using var output = File.Create( outputPath );
-        using var writer = new BinaryWriter( output );
-        model.Write( writer );
-
-        var fileSize = ( int )writer.BaseStream.Length;
-        writer.BaseStream.Position = FileSizeOffset;
-        writer.Write( fileSize );
-        writer.BaseStream.Position = fileSize;
+        WriteModelToFile( model, outputPath );
 
         return Task.FromResult( new ScdWriteResult {
             OutputPath = outputPath,
@@ -116,14 +108,7 @@ public sealed class ScdService : IScdService {
 
         ApplyLoopMetadata( model, audio, playLengthSamples, enableLoop );
 
-        using var output = File.Create( sourceScdPath );
-        using var writer = new BinaryWriter( output );
-        model.Write( writer );
-
-        var fileSize = ( int )writer.BaseStream.Length;
-        writer.BaseStream.Position = FileSizeOffset;
-        writer.Write( fileSize );
-        writer.BaseStream.Position = fileSize;
+        WriteModelToFile( model, sourceScdPath );
 
         return Task.FromResult( new ScdWriteResult {
             OutputPath = sourceScdPath,
@@ -149,14 +134,7 @@ public sealed class ScdService : IScdService {
 
         ApplyLoopMetadata( model, audio, loopEndSamples, enableLoop );
 
-        using var output = File.Create( scdPath );
-        using var writer = new BinaryWriter( output );
-        model.Write( writer );
-
-        var fileSize = ( int )writer.BaseStream.Length;
-        writer.BaseStream.Position = FileSizeOffset;
-        writer.Write( fileSize );
-        writer.BaseStream.Position = fileSize;
+        WriteModelToFile( model, scdPath );
 
         return Task.FromResult( new ScdWriteResult {
             OutputPath = scdPath,
@@ -170,7 +148,7 @@ public sealed class ScdService : IScdService {
         var effectiveLoopEndSamples = enableLoop ? loopEndSamples : 0;
 
         audio.LoopStart = 0;
-        // SCD stores this in byte-space, not in samples. I did not miss that abstraction; the format simply woke up and chose violence years ago.
+        // The SCD audio header stores loop offsets in bytes.
         audio.LoopEnd = enableLoop ? audio.Data.SamplesToBytes( loopEndSamples ) : 0;
         if( enableLoop && audio.LoopEnd <= 0 && audio.DataLength > 0 ) {
             audio.LoopEnd = audio.DataLength;
@@ -197,6 +175,26 @@ public sealed class ScdService : IScdService {
         foreach( var soundEntry in model.SoundEntries ) {
             soundEntry.Attributes &= ~LoopFlag;
         }
+    }
+
+    // Serialize in memory first so a serialization failure cannot truncate an existing SCD.
+    private static void WriteModelToFile( ScdFileModel model, string outputPath ) {
+        using var buffer = new MemoryStream();
+        using var writer = new BinaryWriter( buffer );
+        model.Write( writer );
+
+        var fileSize = ( int )buffer.Length;
+        writer.BaseStream.Position = FileSizeOffset;
+        writer.Write( fileSize );
+        writer.Flush();
+
+        var bytes = buffer.ToArray();
+        var directory = Path.GetDirectoryName( outputPath );
+        if( !string.IsNullOrEmpty( directory ) ) {
+            Directory.CreateDirectory( directory );
+        }
+
+        File.WriteAllBytes( outputPath, bytes );
     }
 
     private static ScdAudioEntry CreateVorbisAudioEntry( ScdAudioEntry templateEntry, string oggPath, out int loopEndSamples ) {

@@ -10,30 +10,21 @@ using MassSCDCreator.Services.Penumbra;
 namespace MassSCDCreator.ViewModels;
 
 public partial class MainWindowViewModel {
-    [RelayCommand( CanExecute = nameof( CanGoBack ) )]
-    private void PreviousStep() {
-        var visibleSteps = GetVisibleSteps();
-        var currentIndex = visibleSteps.IndexOf( CurrentStep );
-        if( currentIndex > 0 ) {
-            CurrentStep = visibleSteps[currentIndex - 1];
-        }
-    }
-
-    private bool CanGoBack() => !IsProcessing && GetVisibleSteps().IndexOf( CurrentStep ) > 0;
-
-    [RelayCommand( CanExecute = nameof( CanGoNext ) )]
-    private void NextStep() {
-        var visibleSteps = GetVisibleSteps();
-        var currentIndex = visibleSteps.IndexOf( CurrentStep );
-        if( currentIndex >= 0 && currentIndex < visibleSteps.Count - 1 ) {
-            CurrentStep = visibleSteps[currentIndex + 1];
-        }
-    }
-
-    private bool CanGoNext() =>
-        !IsProcessing &&
-        CurrentStep is not WizardStep.Review and not WizardStep.Result &&
-        !CurrentStepHasBlockingIssues();
+    private static readonly HashSet<string> PresentationOnlyProperties = [
+        nameof( ProgressPercent ),
+        nameof( ProgressText ),
+        nameof( StatusText ),
+        nameof( SummaryText ),
+        nameof( LogText ),
+        nameof( HasRun ),
+        nameof( IsAudioExpanded ),
+        nameof( IsPenumbraExpanded ),
+        nameof( IsLogExpanded ),
+        nameof( FfmpegInstallStatus ),
+        nameof( IsInstallingFfmpeg ),
+        nameof( ResultOutputFolderPath ),
+        nameof( ResultPlaylistPath )
+    ];
 
     [RelayCommand]
     private void SelectSingleMode() => SelectedMode = ProcessingMode.SingleFile;
@@ -188,14 +179,6 @@ public partial class MainWindowViewModel {
         }
     }
 
-    [RelayCommand]
-    private void BrowseExistingPenumbraPlaylist() {
-        var selected = _dialogService.PickExistingPlaylistFile( Texts["DialogSelectPlaylistFile"] );
-        if( !string.IsNullOrWhiteSpace( selected ) ) {
-            ExistingPenumbraPlaylistPath = selected;
-        }
-    }
-
     [RelayCommand( CanExecute = nameof( CanOpenOutputFolder ) )]
     private void OpenOutputFolder() => OpenPath( ResultOutputFolderPath );
 
@@ -209,9 +192,6 @@ public partial class MainWindowViewModel {
     private bool CanOpenPlaylist() =>
         !string.IsNullOrWhiteSpace( ResultPlaylistPath ) &&
         File.Exists( ResultPlaylistPath );
-
-    [RelayCommand]
-    private void ToggleLog() => IsLogExpanded = !IsLogExpanded;
 
     private void HandlePropertyChanged( object? sender, PropertyChangedEventArgs e ) {
         if( _suspendReactions || string.IsNullOrWhiteSpace( e.PropertyName ) ) {
@@ -227,6 +207,12 @@ public partial class MainWindowViewModel {
                 break;
             case nameof( InputPath ):
                 UpdateSuggestedOutputPath();
+                break;
+            case nameof( UseCustomOutputPath ):
+                if( !UseCustomOutputPath ) {
+                    _outputPathManagedByWizard = true;
+                    UpdateSuggestedOutputPath();
+                }
                 break;
             case nameof( OutputPath ):
                 _outputPathManagedByWizard = string.IsNullOrWhiteSpace( OutputPath ) ||
@@ -250,15 +236,18 @@ public partial class MainWindowViewModel {
                 break;
             case nameof( PenumbraModRootPath ):
                 RefreshPenumbraGamePathCandidates( PenumbraModRootPath, true );
+                RefreshPenumbraPlaylistCandidates( PenumbraModRootPath );
                 break;
             case nameof( ExistingPenumbraPlaylistPath ):
-                ExistingPenumbraPlaylistSummary = TryDescribePenumbraPlaylist( ExistingPenumbraPlaylistPath );
                 ApplyPenumbraPlaylistDefaults( ExistingPenumbraPlaylistPath );
                 break;
             case nameof( PenumbraPlaylistName ):
                 if( SelectedPenumbraExportMode == PenumbraPlaylistExportMode.AppendExisting && IsV4MetadataFile( ExistingPenumbraPlaylistPath ) ) {
                     ApplyPenumbraPlaylistDefaults( ExistingPenumbraPlaylistPath );
                 }
+                break;
+            case nameof( SelectedPenumbraPlaylistCandidate ):
+                ApplySelectedPlaylistCandidate();
                 break;
             case nameof( SelectedPenumbraGamePathCandidate ):
                 if( SelectedPenumbraGamePathCandidate is not null ) {
@@ -270,10 +259,69 @@ public partial class MainWindowViewModel {
                 break;
         }
 
+        // Presentation updates need no validation or persistence. Skip repeated folder scans
+        // and settings writes while still refreshing bindings and commands.
+        if( PresentationOnlyProperties.Contains( e.PropertyName ) ) {
+            UpdateCommandState();
+            OnPropertyChanged( string.Empty );
+            return;
+        }
+
         RefreshState();
         SaveSettings();
     }
 
+
+    private void RefreshPenumbraPlaylistCandidates( string modRootPath ) {
+        var previous = SelectedPenumbraPlaylistCandidate;
+        var candidates = PenumbraPlaylistDiscovery.Discover( modRootPath );
+
+        PenumbraPlaylistCandidates.Clear();
+        foreach( var candidate in candidates ) {
+            PenumbraPlaylistCandidates.Add( candidate );
+        }
+
+        var restored = previous is null
+            ? null
+            : PenumbraPlaylistCandidates.FirstOrDefault( candidate =>
+                string.Equals( candidate.Path, previous.Path, StringComparison.OrdinalIgnoreCase ) &&
+                string.Equals( candidate.GroupName, previous.GroupName, StringComparison.OrdinalIgnoreCase ) );
+
+        RunSilently( () => SelectedPenumbraPlaylistCandidate = restored );
+        if( restored is null && previous is not null ) {
+            RunSilently( () => {
+                ExistingPenumbraPlaylistPath = string.Empty;
+                InferredRelativeFolderWarning = string.Empty;
+            } );
+        }
+
+        OnPropertyChanged( nameof( HasPenumbraPlaylistCandidates ) );
+        OnPropertyChanged( nameof( ShowNoPlaylistsFound ) );
+    }
+
+    private void ApplySelectedPlaylistCandidate() {
+        if( SelectedPenumbraPlaylistCandidate is not { } candidate ) {
+            return;
+        }
+
+        RunSilently( () => {
+            ExistingPenumbraPlaylistPath = candidate.Path;
+            PenumbraPlaylistName = candidate.GroupName;
+
+            if( !string.IsNullOrWhiteSpace( candidate.RelativeFolder ) ) {
+                PenumbraRelativeScdFolder = candidate.RelativeFolder;
+            }
+
+            if( candidate.GamePaths.Count > 0 ) {
+                PenumbraGamePathsText = string.Join( Environment.NewLine, candidate.GamePaths );
+            }
+
+            InferredRelativeFolderWarning = candidate.HasMixedFolders
+                ? Texts.Format( "ExistingPlaylistRelativeFolderWarning", candidate.RelativeFolder )
+                : string.Empty;
+        } );
+
+    }
     private void RefreshPenumbraGamePathCandidates( string modRootPath, bool replaceCurrentPath ) {
         var candidates = PenumbraGamePathDiscovery.Discover( modRootPath );
         PenumbraGamePathCandidates.Clear();
@@ -322,7 +370,6 @@ public partial class MainWindowViewModel {
         } );
 
         UpdateSuggestedOutputPath();
-        EnsureCurrentStepIsVisible();
     }
 
     private void CoerceAdvancedValue() {
@@ -352,8 +399,14 @@ public partial class MainWindowViewModel {
             return;
         }
 
-        // This little guardrail exists because users absolutely should win once they type a custom path. The wizard is here to help, not to become their overbearing roommate.
-        if( _outputPathManagedByWizard || string.IsNullOrWhiteSpace( OutputPath ) || string.Equals( OutputPath, _lastSuggestedOutputPath, StringComparison.OrdinalIgnoreCase ) ) {
+        // Preserve a user-specified path until it is cleared or custom output is disabled.
+        var derivedPathOwnsTheField =
+            !UseCustomOutputPath ||
+            _outputPathManagedByWizard ||
+            string.IsNullOrWhiteSpace( OutputPath ) ||
+            string.Equals( OutputPath, _lastSuggestedOutputPath, StringComparison.OrdinalIgnoreCase );
+
+        if( derivedPathOwnsTheField ) {
             RunSilently( () => OutputPath = suggested );
             _outputPathManagedByWizard = true;
         }
@@ -385,57 +438,11 @@ public partial class MainWindowViewModel {
         return string.Empty;
     }
 
-    private void EnsureCurrentStepIsVisible() {
-        var visibleSteps = GetVisibleSteps();
-        if( !visibleSteps.Contains( CurrentStep ) ) {
-            CurrentStep = visibleSteps.Last();
-        }
-    }
-
     private void RefreshState() {
-        RefreshStepItems();
         RefreshValidationIssues();
         UpdateCommandState();
         OnPropertyChanged( string.Empty );
     }
-
-    private void RefreshStepItems() {
-        var visibleSteps = GetVisibleSteps();
-        var currentIndex = visibleSteps.IndexOf( CurrentStep );
-
-        foreach( var step in Steps ) {
-            var stepIndex = visibleSteps.IndexOf( step.Step );
-            step.DisplayTitle = Texts[step.TitleKey];
-            step.DisplayDescription = Texts[step.DescriptionKey];
-            step.IsVisible = stepIndex >= 0;
-            step.IsCurrent = step.Step == CurrentStep;
-            step.IsCompleted = stepIndex >= 0 && currentIndex > stepIndex;
-        }
-    }
-
-    private List<WizardStep> GetVisibleSteps() {
-        var steps = new List<WizardStep> {
-            WizardStep.Workflow,
-            WizardStep.Paths,
-            WizardStep.TemplateAudio
-        };
-
-        if( ShowPenumbraStep ) {
-            steps.Add( WizardStep.Penumbra );
-        }
-
-        steps.Add( WizardStep.Review );
-        steps.Add( WizardStep.Result );
-        return steps;
-    }
-
-    private bool CurrentStepHasBlockingIssues() => CurrentStep switch {
-        WizardStep.Paths => PathsIssues.Count > 0,
-        WizardStep.TemplateAudio => TemplateIssues.Count > 0,
-        WizardStep.Penumbra => ShowPenumbraStep && PenumbraIssues.Count > 0,
-        WizardStep.Review => ReviewIssues.Count > 0,
-        _ => false
-    };
 
     private static void OpenPath( string path ) {
         if( string.IsNullOrWhiteSpace( path ) ) {
@@ -449,8 +456,6 @@ public partial class MainWindowViewModel {
     }
 
     private void UpdateCommandState() {
-        PreviousStepCommand.NotifyCanExecuteChanged();
-        NextStepCommand.NotifyCanExecuteChanged();
         StartCommand.NotifyCanExecuteChanged();
         CancelCommand.NotifyCanExecuteChanged();
         OpenOutputFolderCommand.NotifyCanExecuteChanged();

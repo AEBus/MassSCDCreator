@@ -32,7 +32,7 @@ public sealed class FfmpegAudioConverter : IAudioConverter {
             Path.GetFullPath( inputPath ),
             Path.GetFullPath( oggOutputPath ),
             StringComparison.OrdinalIgnoreCase );
-        // I used to sneer at temp-file dances. Then I got older, calmer, and less interested in debugging self-overwrites from ffmpeg.
+        // ffmpeg cannot overwrite its input; encode to a temporary file when the paths match.
         var actualOutputPath = samePath
             ? Path.Combine(
                 Path.GetDirectoryName( oggOutputPath )!,

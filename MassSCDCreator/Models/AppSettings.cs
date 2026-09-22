@@ -6,6 +6,9 @@ public sealed class AppSettings {
     public TemplateSourceMode SelectedTemplateSourceMode { get; set; } = TemplateSourceMode.BuiltInRecommended;
     public string InputPath { get; set; } = string.Empty;
     public string OutputPath { get; set; } = string.Empty;
+
+    // Null identifies older settings; infer the option from the saved output path.
+    public bool? UseCustomOutputPath { get; set; }
     public string TemplateScdPath { get; set; } = string.Empty;
     public string FfmpegPath { get; set; } = string.Empty;
     public bool SkipFfmpegStartupCheck { get; set; }
@@ -13,6 +16,7 @@ public sealed class AppSettings {
     public bool RefreshRecursiveSearchEnabled { get; set; }
     public bool SaveIntermediateOggFiles { get; set; }
     public bool EnableLoop { get; set; }
+    public bool NormalizeLoudness { get; set; } = true;
     public AudioProfileMode? SelectedAudioProfileMode { get; set; }
 
     // Legacy fields kept for backward-compatible settings migration.

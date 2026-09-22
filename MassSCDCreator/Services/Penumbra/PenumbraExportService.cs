@@ -1,6 +1,7 @@
 using System.IO;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.Encodings.Web;
 using MassSCDCreator.Models;
 
@@ -53,7 +54,7 @@ public sealed class PenumbraExportService : IPenumbraExportService {
                 File.Copy( scdPath, destinationPath, true );
             }
 
-            // Penumbra is perfectly happy to be opinionated about slashes at the worst possible moment, so we normalize once and keep it boring.
+            // Mod file paths use backslashes; game paths use forward slashes.
             var relativeFilePath = Path.Combine( relativeFolder, fileName ).Replace( '/', '\\' );
             var files = new Dictionary<string, string>( StringComparer.OrdinalIgnoreCase );
             foreach( var gamePath in options.GamePaths ) {
@@ -106,6 +107,7 @@ public sealed class PenumbraExportService : IPenumbraExportService {
         return Task.FromResult( groupPath );
     }
 
+    // Edit Options in the JSON tree so fields absent from our models survive the append.
     private static string AppendToExistingPlaylist( PenumbraExportOptions options, List<PenumbraPlaylistOption> entries ) {
         if( string.IsNullOrWhiteSpace( options.ExistingPlaylistPath ) ) {
             throw new InvalidOperationException( "An existing Penumbra playlist JSON file must be selected for append mode." );
@@ -115,30 +117,50 @@ public sealed class PenumbraExportService : IPenumbraExportService {
             throw new FileNotFoundException( $"Penumbra playlist JSON was not found: {options.ExistingPlaylistPath}" );
         }
 
-        var jsonOptions = CreateJsonOptions();
-        var existingGroup = JsonSerializer.Deserialize<PenumbraPlaylistGroup>( File.ReadAllText( options.ExistingPlaylistPath ), jsonOptions )
-            ?? throw new InvalidOperationException( $"Unable to parse Penumbra playlist JSON: {options.ExistingPlaylistPath}" );
-        NormalizeLoadedGroup( existingGroup );
+        if( JsonNode.Parse( File.ReadAllText( options.ExistingPlaylistPath ) ) is not JsonObject root ) {
+            throw new InvalidOperationException( $"Unable to parse Penumbra playlist JSON: {options.ExistingPlaylistPath}" );
+        }
 
-        if( !string.Equals( existingGroup.Type, "Single", StringComparison.OrdinalIgnoreCase ) ) {
+        var groupType = root["Type"]?.GetValue<string>();
+        if( !string.Equals( groupType, "Single", StringComparison.OrdinalIgnoreCase ) ) {
             throw new InvalidOperationException( "Append mode currently supports only Penumbra Single groups." );
         }
 
-        existingGroup.Options ??= [];
-        var usedNames = existingGroup.Options
-            .Select( option => option.Name )
+        if( root["Options"] is not JsonArray existingOptions ) {
+            existingOptions = [];
+            root["Options"] = existingOptions;
+        }
+
+        var usedNames = existingOptions
+            .OfType<JsonObject>()
+            .Select( option => option["Name"]?.GetValue<string>() )
             .Where( name => !string.IsNullOrWhiteSpace( name ) )
-            .Cast<string>()
+            .Select( name => name! )
             .ToHashSet( StringComparer.OrdinalIgnoreCase );
 
         foreach( var entry in entries ) {
             entry.Name = MakeUniqueOptionName( entry.Name ?? "Track", usedNames );
             usedNames.Add( entry.Name );
-            existingGroup.Options.Add( entry );
+            existingOptions.Add( CreateOptionNode( entry ) );
         }
 
-        File.WriteAllText( options.ExistingPlaylistPath, JsonSerializer.Serialize( existingGroup, jsonOptions ), new UTF8Encoding( false ) );
+        PenumbraV4MetadataEditor.WriteJsonWithBackup( options.ExistingPlaylistPath, root );
         return options.ExistingPlaylistPath;
+    }
+
+    private static JsonObject CreateOptionNode( PenumbraPlaylistOption option ) {
+        var files = new JsonObject();
+        foreach( var pair in option.Files ?? [] ) {
+            files[pair.Key] = pair.Value;
+        }
+
+        return new JsonObject {
+            ["Name"] = option.Name,
+            ["Description"] = option.Description ?? string.Empty,
+            ["Files"] = files,
+            ["FileSwaps"] = new JsonObject(),
+            ["Manipulations"] = new JsonArray()
+        };
     }
 
     private static string NormalizeRelativeFolder( string value ) {
@@ -151,13 +173,24 @@ public sealed class PenumbraExportService : IPenumbraExportService {
         return trimmed;
     }
 
+    // Game paths must be relative and use forward slashes, without drive letters or query strings.
     private static string NormalizeGamePath( string value ) {
         var trimmed = value.Trim();
         if( string.IsNullOrWhiteSpace( trimmed ) ) {
             throw new InvalidOperationException( "Game path entries must not be empty." );
         }
 
-        return trimmed.Replace( '\\', '/' );
+        var normalized = trimmed.Replace( '\\', '/' );
+
+        if( normalized.StartsWith( '/' ) || normalized.StartsWith( '.' ) ) {
+            throw new InvalidOperationException( $"Game path must be relative and cannot start with '/' or '.': {trimmed}" );
+        }
+
+        if( normalized.Contains( ':' ) || normalized.Contains( '?' ) ) {
+            throw new InvalidOperationException( $"Game path cannot contain ':' or '?': {trimmed}" );
+        }
+
+        return normalized;
     }
 
     private static int GetNextGroupIndex( string modRootPath ) {

@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.IO;
 using MassSCDCreator.Models;
 using MassSCDCreator.Services.Audio;
@@ -43,11 +44,13 @@ public sealed class FileBatchProcessor : IFileBatchProcessor {
 
         _logger.Info( $"Template loaded: {template.SourcePath}" );
         _logger.Info( $"Detected {sourceFiles.Count} input file(s)." );
+        LogConversionSettings( request );
+        var workingTempRoot = Path.Combine( Path.GetTempPath(), "MassSCDCreator", Guid.NewGuid().ToString( "N" ) );
+        var outputScdPaths = ResolveOutputScdPaths( request, sourceFiles, Path.Combine( workingTempRoot, "scd" ) );
 
         var successCount = 0;
         var errorCount = 0;
         var generatedScdPaths = new List<string>( sourceFiles.Count );
-        var workingTempRoot = Path.Combine( Path.GetTempPath(), "MassSCDCreator", Guid.NewGuid().ToString( "N" ) );
         string? exportedPlaylistPath = null;
 
         try {
@@ -67,10 +70,10 @@ public sealed class FileBatchProcessor : IFileBatchProcessor {
                 try {
                     _logger.Info( $"Processing: {sourceFile}" );
 
-                    var outputScdPath = GetOutputScdPath( request, sourceFile );
+                    var outputScdPath = outputScdPaths[index];
                     var oggPath = useOriginalOgg
                         ? sourceFile
-                        : GetIntermediateOggPath( request, sourceFile, outputScdPath, workingTempRoot );
+                        : GetIntermediateOggPath( request, outputScdPath, workingTempRoot );
 
                     if( !useOriginalOgg ) {
                         await _audioConverter.ConvertAudioToOggAsync( sourceFile, oggPath, request.Conversion, cancellationToken );
@@ -154,6 +157,10 @@ public sealed class FileBatchProcessor : IFileBatchProcessor {
 
         _logger.Info( $"Detected {sourceFiles.Count} SCD file(s) for refresh." );
 
+        if( request.Conversion.ExistingScdRefreshAction != ExistingScdRefreshAction.MatchTemplateOnly ) {
+            LogConversionSettings( request );
+        }
+
         var successCount = 0;
         var errorCount = 0;
         var workingTempRoot = Path.Combine( Path.GetTempPath(), "MassSCDCreatorRefresh", Guid.NewGuid().ToString( "N" ) );
@@ -232,6 +239,23 @@ public sealed class FileBatchProcessor : IFileBatchProcessor {
         }
     }
 
+
+    private void LogConversionSettings( ProcessRequest request ) {
+        if( request.Conversion.AudioProfileMode == AudioProfileMode.OriginalOgg ) {
+            _logger.Info( "Audio: source OGG packaged as-is, no re-encoding." );
+            return;
+        }
+
+        var quality = request.Conversion.AdvancedMode == OggAdvancedMode.NominalBitrate
+            ? $"{request.Conversion.NominalBitrateKbps} kbps"
+            : $"VBR quality {request.Conversion.QualityLevel.ToString( "0.0", CultureInfo.InvariantCulture )}";
+        var loudness = request.Conversion.NormalizeLoudness
+            ? "loudness normalized to -14 LUFS"
+            : "original loudness kept";
+
+        _logger.Info( $"Audio: {quality}, stereo 44.1 kHz, {loudness}." );
+    }
+
     private static void ValidateRequest( ProcessRequest request ) {
         ValidateTemplateSource( request );
 
@@ -244,12 +268,15 @@ public sealed class FileBatchProcessor : IFileBatchProcessor {
                 throw new InvalidOperationException( "Original OGG profile only supports .ogg input files in single-file mode." );
             }
 
-            var directory = Path.GetDirectoryName( request.OutputPath );
-            if( string.IsNullOrWhiteSpace( directory ) ) {
-                throw new InvalidOperationException( "Choose a valid output path for the SCD file." );
+            if( KeepsOutputOnDisk( request ) ) {
+                var directory = Path.GetDirectoryName( request.OutputPath );
+                if( string.IsNullOrWhiteSpace( directory ) ) {
+                    throw new InvalidOperationException( "Choose a valid output path for the SCD file." );
+                }
+
+                Directory.CreateDirectory( directory );
             }
 
-            Directory.CreateDirectory( directory );
             return;
         }
 
@@ -263,9 +290,23 @@ public sealed class FileBatchProcessor : IFileBatchProcessor {
             ValidateOriginalOggBatchInput( request );
         }
 
-        if( request.Mode != ProcessingMode.RepairScdFolder ) {
+        if( request.Mode != ProcessingMode.RepairScdFolder && KeepsOutputOnDisk( request ) ) {
             Directory.CreateDirectory( request.OutputPath );
         }
+    }
+
+    // Without a permanent output path, export must retain the files before temporary output is deleted.
+    private static bool KeepsOutputOnDisk( ProcessRequest request ) {
+        if( !string.IsNullOrWhiteSpace( request.OutputPath ) ) {
+            return true;
+        }
+
+        if( request.Mode != ProcessingMode.RepairScdFolder && !request.PenumbraExport.Enabled ) {
+            throw new InvalidOperationException(
+                "Choose an output folder for the SCD files, or enable the Penumbra export so they have somewhere to go." );
+        }
+
+        return false;
     }
 
     private static void ValidateTemplateSource( ProcessRequest request ) {
@@ -378,26 +419,52 @@ public sealed class FileBatchProcessor : IFileBatchProcessor {
         return await _scdService.CreateFromTemplateAsync( template, oggForWrite, sourceFile, request.Conversion.EnableLoop, cancellationToken );
     }
 
-    private static string GetOutputScdPath( ProcessRequest request, string sourceFile ) {
+    // Empty OutputPath uses temporary storage until export. Batch output and Penumbra export
+    // flatten source folders, so reserve unique names before processing any files.
+    private List<string> ResolveOutputScdPaths( ProcessRequest request, IReadOnlyList<string> sourceFiles, string transientRoot ) {
+        var keptOnDisk = !string.IsNullOrWhiteSpace( request.OutputPath );
+
         if( request.Mode == ProcessingMode.SingleFile ) {
-            return request.OutputPath;
+            return [keptOnDisk
+                ? request.OutputPath
+                : Path.Combine( transientRoot, Path.GetFileNameWithoutExtension( sourceFiles[0] ) + ".scd" )];
         }
 
-        var fileName = Path.GetFileNameWithoutExtension( sourceFile ) + ".scd";
-        return Path.Combine( request.OutputPath, fileName );
+        var outputRoot = keptOnDisk ? request.OutputPath : transientRoot;
+        var paths = new List<string>( sourceFiles.Count );
+        var used = new HashSet<string>( StringComparer.OrdinalIgnoreCase );
+
+        foreach( var sourceFile in sourceFiles ) {
+            var stem = Path.GetFileNameWithoutExtension( sourceFile );
+            var candidate = Path.Combine( outputRoot, stem + ".scd" );
+
+            if( used.Add( candidate ) ) {
+                paths.Add( candidate );
+                continue;
+            }
+
+            var suffix = 2;
+            string disambiguated;
+            do {
+                disambiguated = Path.Combine( outputRoot, $"{stem}_{suffix}.scd" );
+                suffix++;
+            }
+            while( !used.Add( disambiguated ) );
+
+            _logger.Info( $"Output name already taken, writing {Path.GetFileName( disambiguated )} for: {sourceFile}" );
+            paths.Add( disambiguated );
+        }
+
+        return paths;
     }
-
-    private static string GetIntermediateOggPath( ProcessRequest request, string sourceFile, string outputScdPath, string tempRoot ) {
+    // Reuse the unique SCD output name to avoid collisions between intermediate OGG files.
+    private static string GetIntermediateOggPath( ProcessRequest request, string outputScdPath, string tempRoot ) {
         if( request.Conversion.SaveIntermediateOggFiles ) {
-            var outputDirectory = request.Mode == ProcessingMode.SingleFile
-                ? Path.GetDirectoryName( outputScdPath )!
-                : request.OutputPath;
-
-            return Path.Combine( outputDirectory, Path.GetFileNameWithoutExtension( sourceFile ) + ".ogg" );
+            return Path.ChangeExtension( outputScdPath, ".ogg" );
         }
 
         Directory.CreateDirectory( tempRoot );
-        return Path.Combine( tempRoot, Path.GetFileNameWithoutExtension( sourceFile ) + ".ogg" );
+        return Path.Combine( tempRoot, Path.GetFileNameWithoutExtension( outputScdPath ) + ".ogg" );
     }
 
     private static void TryDeleteDirectory( string path ) {
